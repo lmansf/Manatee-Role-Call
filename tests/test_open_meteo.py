@@ -11,6 +11,14 @@ def test_archive_params_cover_window():
     assert p["start_date"] == "2024-01-01"
     assert p["end_date"] == "2024-01-31"
     assert "temperature_2m_max" in p["daily"]
+    assert p["hourly"] == "temperature_2m"
+    assert p["temperature_unit"] == "celsius"
+
+
+def test_forecast_params_never_request_past_days():
+    p = open_meteo.build_forecast_params()
+    assert "past_days" not in p
+    assert p["forecast_days"] == 7
 
 
 @pytest.mark.skip(reason="TODO(you): implement parse_daily, then save a fixture and unskip")

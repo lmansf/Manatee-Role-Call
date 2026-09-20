@@ -53,6 +53,14 @@ class Tables:
         return self._q("weather_daily")
 
     @property
+    def weather_hourly(self) -> str:
+        return self._q("weather_hourly")
+
+    @property
+    def weather_forecast(self) -> str:
+        return self._q("weather_forecast_daily")
+
+    @property
     def counts_raw(self) -> str:
         return self._q("blue_spring_counts_raw")
 

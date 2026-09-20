@@ -44,9 +44,28 @@ Deliverables: a GitHub repo, a Tableau Public dashboard, and a short written wal
 - Blends ECMWF, GFS, ICON and others.
 - Historical reanalysis goes back decades — **use it to backfill the baseline** rather than
   waiting months to accumulate one.
-- **Open question:** whether to pull forecasts as well as observations. Forecasts get
-  *revised* before the target date, which is genuine, un-manufactured drift — good material
-  for the distribution checks.
+- **Decided (2026-09-20): fields and forecasts.**
+  - Daily, from the archive endpoint: `temperature_2m_min`, `temperature_2m_max`,
+    `temperature_2m_mean`, `precipitation_sum`, `wind_speed_10m_max`,
+    `shortwave_radiation_sum`. Each has a named mechanism (air temp as the river-temp proxy;
+    rain cools the run and cancels counts; wind mixes and cools; solar drives recovery after
+    a cold snap). Humidity, pressure, cloud cover and apparent-temperature variants are
+    deliberately left out.
+  - Hourly `temperature_2m` alongside, because degree-hours below 20°C and consecutive cold
+    hours can't be computed honestly from a daily min/max. Bonus: a daily mean recomputed
+    from the hourly series should match the API's `temperature_2m_mean` within rounding —
+    a free consistency check on the source.
+  - Units pinned explicitly on every call (`celsius`, `mm`, `kmh`); `daily_units` and
+    `hourly_units` persisted with the raw payload so the unit-change check has a reference.
+  - **Forecasts: yes, separate table, not a model input at first.** Each daily run pulls the
+    7-day daily forecast for the same fields, keyed by issue date and target date. The
+    driving reason is train/serve skew: a model that predicts tomorrow's count needs
+    tomorrow's weather, and that is a forecast. Revision drift between issues for the same
+    target date is the distribution check's real, un-manufactured drift. Stage 3 decides
+    whether the model consumes forecasts.
+  - Observations come from the archive only. The forecast endpoint's `past_days` serves
+    recent days from a different model; mixing them puts a step change at the most recent
+    week. Accept the ~5 day archive lag.
 
 ### 3.2 Blue Spring manatee counts (the modelling target)
 - Park staff run a daily count each morning during manatee season (~November to mid-March).
@@ -168,4 +187,6 @@ mistake for an official project.
 ## 8. Open questions
 
 1. ~~Where the mutation generator lives~~ — decided: standalone on-demand script (§3.4).
-2. Which Open-Meteo fields to pull, and whether to include revisable forecasts.
+2. ~~Which Open-Meteo fields to pull, and whether to include revisable forecasts~~ — decided (§3.1).
+
+None open.
