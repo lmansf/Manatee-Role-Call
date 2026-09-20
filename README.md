@@ -19,6 +19,8 @@ roll_call/
 jobs/
   ingest_daily.py      scheduled Databricks entrypoint
   backfill_weather.py  one-off reanalysis backfill for the baseline
+tools/
+  mutate.py            on-demand mutation generator; points at table copies only
 tests/                 parser tests against saved fixtures, no network
 ```
 

@@ -69,8 +69,11 @@ Deliverables: a GitHub repo, a Tableau Public dashboard, and a short written wal
 - Points at *copies*, never the real tables. Its job is to prove every check actually fires.
 - Accepted trade-off: it's a closed loop (you wrote the bug and the detector), which is why
   it sits alongside a real source rather than replacing one.
-- **Open question:** does it run as a test suite on every deploy, or as a script pointed at
-  things on demand?
+- **Decided (2026-09-20):** a standalone, on-demand script. Invoked by hand with a target
+  table argument. It must refuse to run against anything that isn't a copy (a name-prefix
+  guard is the minimum). Rationale: a deploy-time suite would run against fixtures, which
+  closes the loop even tighter; an on-demand script at least exercises the real check code
+  against real Delta tables.
 
 ## 4. The model
 
@@ -164,5 +167,5 @@ mistake for an official project.
 
 ## 8. Open questions
 
-1. Where the mutation generator lives — deploy-time test suite, or on-demand script.
+1. ~~Where the mutation generator lives~~ — decided: standalone on-demand script (§3.4).
 2. Which Open-Meteo fields to pull, and whether to include revisable forecasts.
