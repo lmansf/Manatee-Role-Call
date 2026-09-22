@@ -3,7 +3,8 @@
 A daily manatee-count pipeline for Blue Spring State Park, built so the interesting part is
 the data-quality layer: what happens when a source drifts, goes stale, or changes shape.
 
-Full design: [`roll-call-spec.md`](roll-call-spec.md).
+Full design: [`roll-call-spec.md`](roll-call-spec.md). Source API calls and scraping notes:
+[`docs/sources.md`](docs/sources.md).
 
 ## Layout
 

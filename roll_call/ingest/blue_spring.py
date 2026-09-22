@@ -20,10 +20,13 @@ from bs4 import BeautifulSoup
 
 from roll_call.ingest.base import IngestResult, IngestRun, sha256_text
 
-# TODO(you): confirm the current listing URL for the Blue Spring sighting reports on
-# savethemanatee.org and put it here. Store it in one place so a URL change is a
-# one-line fix and shows up in `ingest_runs.source_url`.
-LISTING_URL = "https://www.savethemanatee.org/"
+# Hub page linking each season's report page. Season/month page slugs change every year
+# (see docs/sources.md §2), so those are discovered from here, never hard-coded.
+LISTING_URL = "https://savethemanatee.org/bssp-manatee-reports/"
+
+# If the WordPress REST API turns out to be open (docs/sources.md §2, smoke test 3),
+# prefer it: post bodies without the theme wrapper, and `modified` as a freshness signal.
+WP_API_URL = "https://savethemanatee.org/wp-json/wp/v2"
 
 SOURCE_NAME = "blue_spring_counts"
 
@@ -35,7 +38,10 @@ class SightingReport:
     """One parsed report. `count` is None when the report says no count was taken."""
 
     report_date: date
-    count: int | None
+    # Researchers and park staff count separately and both numbers are usually reported.
+    # Keep both; the gap between them is a distribution-check feature, not noise.
+    count_smc: int | None
+    count_park: int | None
     river_temp_f: float | None
     spring_temp_f: float | None
     post_url: str
@@ -46,7 +52,8 @@ class SightingReport:
     def to_record(self) -> dict[str, Any]:
         return {
             "report_date": self.report_date,
-            "count": self.count,
+            "count_smc": self.count_smc,
+            "count_park": self.count_park,
             "river_temp_f": self.river_temp_f,
             "spring_temp_f": self.spring_temp_f,
             "post_url": self.post_url,
@@ -78,10 +85,14 @@ def parse_report(html: str, post_url: str) -> SightingReport:
 
     TODO(you): implement. Suggested order of attack:
       1. Date. Is it in the URL, the title, a <time> tag, or only in the prose?
-      2. Count. Find the sentence, then the number. Keep the sentence (`count_text`).
-      3. Temperatures. River and spring are usually both mentioned; don't assume order.
+      2. Counts. Find the sentence, then the numbers. Keep the sentence (`count_text`).
+         Two counts per day are common ("186 by researchers, 191 by the park"). A count
+         qualified by "additional" or "new" is not a roll call total; don't store it as one.
+      3. Temperatures. Written as °F with °C in parentheses, sometimes with "~". Parse the
+         °F figure; use the °C only as a cross-check.
       4. The "no count today" case. Return count=None, not 0. Zero manatees is data;
          no count is absence of data, and the volume check needs to tell them apart.
+         Off-season monthly updates (April, June, August) carry no roll call at all.
 
     Resist a single giant regex. Several small, named ones fail in more legible ways.
     """
