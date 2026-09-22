@@ -20,6 +20,7 @@ roll_call/
 jobs/
   ingest_daily.py      scheduled Databricks entrypoint
   backfill_weather.py  one-off reanalysis backfill for the baseline
+data/reference/        hand-transcribed counts for scoring the parser (never a source)
 tools/
   mutate.py            on-demand mutation generator; points at table copies only
 tests/                 parser tests against saved fixtures, no network

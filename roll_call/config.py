@@ -69,6 +69,11 @@ class Tables:
         return self._q("blue_spring_counts_daily")
 
     @property
+    def counts_reference(self) -> str:
+        """Hand-transcribed counts (data/reference). Scores the parser; never trains."""
+        return self._q("blue_spring_counts_reference")
+
+    @property
     def ingest_runs(self) -> str:
         return self._q("ingest_runs")
 
