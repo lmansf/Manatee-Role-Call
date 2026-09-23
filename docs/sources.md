@@ -112,27 +112,35 @@ Hub page: `https://savethemanatee.org/bssp-manatee-reports/` ("Manatee Sighting 
 An older path, `/manatees/manatee-webcams/manatee-reports/`, still appears in search;
 treat it as a redirect, not a second source.
 
-The reports are **not one post per day**. They have been organised differently each
-season, and the slug has changed every year:
+The reports are **not one post per day**. Each finished season is archived as one long
+page, and the slug has changed over the years:
 
 | Season | URL |
 |---|---|
 | 2018–19 | `/?p=4458` |
-| 2021–22 | `/manatee-reports-2021-2022/` |
+| 2019–20 | `/manatee-sighting-reports-2019-2020/` |
+| 2020–21 | `/manatee-sighting-reports-2020-2021/` |
+| 2021–22 | `/manatee-sighting-reports-2021-2022/` (an older `/manatee-reports-2021-2022/` also exists) |
 | 2022–23 | `/bssp-report-2022-2023/` |
 | 2023–24 | `/manatee-sighting-reports-2023-2024/` |
 | 2024–25 | `/manatee-sighting-reports-2024-2025/` |
-| 2025–26 | monthly posts: `/manatee-sightings-update-december-2025/`, `/manatee-sightings-update-february-2026/`, plus `/sightings-update-manatee-season-has-started-at-blue-spring/` |
+| 2025–26 | no archive page found as of 2026-09-23; the current season appears to live on the hub itself |
 
-Two things follow. The scraper must discover season and month pages from the hub rather
-than hard-code a slug. And the source has already changed shape once, from one page per
-season to one post per month, between the 2024–25 and 2025–26 seasons. A
-`Protected: Manatee Sighting Update: December 2025` page also exists alongside the public
-one (WordPress password protection), so a post matching the title pattern can still have
-no readable body.
+No season page before 2018–19 turned up in search.
 
-Off-season monthly updates exist too (April, June, August). They carry no roll call.
-The parser must not treat them as zero-count days.
+Separately, "Manatee Sightings Update: <Month> <Year>" posts appear every couple of months,
+in every year back to at least 2021. They are adoptee narratives, not daily roll calls, and
+off-season ones (April, June, August) carry no count at all. They are not a count source.
+
+Consequences for the scraper: discover season pages from the hub rather than hard-coding
+slugs, and expect the hub to hold whichever season is current. **Time-sensitive:** if
+2025–26 really lives only on the hub, it will be replaced when the 2026–27 season starts
+around 1 November. Cache that page before then. A
+`Protected: Manatee Sighting Update: December 2025` page also exists (WordPress password
+protection), so a URL matching the pattern can still have no readable body.
+
+`tools/extract_seasons.py` produces one CSV per season from these pages; see
+`data/seasons/README.md`.
 
 ### How entries are written
 

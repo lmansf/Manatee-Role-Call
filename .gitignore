@@ -6,3 +6,5 @@ __pycache__/
 .env
 secrets/
 service-account*.json
+# cached third-party pages; re-fetchable, not ours to redistribute
+data/raw/
