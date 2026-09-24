@@ -46,12 +46,13 @@ See [ADR 0002](docs/adr/0002-local-scheduled-script-with-duckdb.md).
 - **Storage:** one DuckDB file. Every table a run touches is keyed so re-running is safe.
 - **Publish:** the run's last step, `jobs/publish_dashboard.py`, exports the dashboard CSVs,
   commits them and pushes to `main` (§6).
-- **Push access:** an SSH deploy key with write access to this one repo, not a personal token.
-  Setup: [`docs/scheduling.md`](docs/scheduling.md).
+- **Push access:** a fine-grained personal access token limited to this repo, with read and
+  write access to contents. It expires and gets renewed. Setup:
+  [`docs/scheduling.md`](docs/scheduling.md).
 - **Dashboard hosting:** Vercel rebuilds the Evidence site on every push to `main`
   ([ADR 0003](docs/adr/0003-evidence-on-vercel-instead-of-tableau.md)).
 - **Secrets:** a `.env` file in the repo folder, ignored by git. `.env.example` lists the keys.
-  The deploy key lives in `~/.ssh`, outside the repo.
+  The push token lives in git's credential store (`~/.git-credentials`), outside the repo.
 - **Backup:** clearing decisions and the baseline refresh log are exported as CSV and committed
   (they are the records only a person could make). The whole database file is copied weekly to
   a second disk by a second timer.
@@ -177,7 +178,7 @@ SQL and Markdown and runs its queries at build time. Why not Tableau Public:
 
 1. The daily run ends with `jobs/publish_dashboard.py`. It computes the summaries in Python and
    writes them as CSV into `dashboard/sources/roll_call/`.
-2. If any file changed, it commits only that folder and pushes to `main` with the deploy key.
+2. If any file changed, it commits only that folder and `data/records/`, then pushes to `main`.
    It refuses to run on another branch or with other uncommitted changes.
 3. Vercel sees the push and rebuilds the site from `dashboard/`.
 
@@ -206,6 +207,11 @@ days old. The owner's machine may be off, and the dashboard has to say so.
    including replayed years.
 2. **Per-source status.** Last successful run, rows against expectation, null rate against normal.
 3. **Quarantine queue.** Open items and time to clear, the metric that proves the loop closes.
+
+The site shows data-quality views only. The counts are Save the Manatee Club's published
+fieldwork, so a counts-and-predictions page waits for stage 3, when there are predictions to
+show. The owner emails Save the Manatee Club before adding it, and the page credits and links
+to their reports.
 
 ## 7. Naming
 

@@ -25,7 +25,8 @@ builds on Vercel's side, so this adds no GitHub Actions.
   never committed.
 - The timer runs from a separate runner clone kept on `main` and never used for editing, so the
   publish step can commit and push without touching work in progress.
-- Pushing uses an SSH deploy key with write access to this one repo, not a personal token.
+- Pushing uses a fine-grained personal access token limited to this repo. It expires, so it
+  needs renewing.
 - `main` gets about one data commit a day.
 - The site shows when its data was generated and warns when that is more than two days old,
   because the owner's machine may be off.

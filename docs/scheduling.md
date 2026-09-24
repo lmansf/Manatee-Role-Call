@@ -30,40 +30,64 @@ If it isn't mounted, the backup fails on purpose.
 
 ## 2. Give the runner clone push access
 
-The push uses a deploy key: an SSH key that GitHub attaches to one repo, not to your account.
-If it leaks, it reaches this repo and nothing else.
+The push uses a fine-grained personal access token. It's a password-like string that GitHub
+limits to the one repo and the one permission you pick. It acts as you, and it expires, so
+you'll renew it when it does.
 
-Create the key. `-N ""` leaves it without a passphrase, because the timer can't type one.
+### Create the token on GitHub
 
-```sh
-ssh-keygen -t ed25519 -C "roll-call-runner" -f ~/.ssh/roll_call_deploy -N ""
-cat ~/.ssh/roll_call_deploy.pub
-```
+1. Click your profile picture in the top right, then Settings.
+2. At the bottom of the left sidebar, open Developer settings.
+3. Open Personal access tokens, then Fine-grained tokens, then Generate new token.
+4. Name it `roll-call-runner`.
+5. Pick an expiration. Longer means fewer renewals. Put a reminder in your calendar a week
+   before the date.
+6. Under Repository access, choose "Only select repositories" and pick `Manatee-Role-Call`.
+7. Under Permissions, open Repository permissions and set Contents to "Read and write". Leave
+   everything else as it is. GitHub adds read-only Metadata by itself.
+8. Click Generate token and copy it. GitHub shows it only once.
 
-On GitHub, open the repo's Settings, then Deploy keys, then Add deploy key. Paste the public key,
-name it `roll-call-runner`, and tick "Allow write access".
+### Store it in the runner clone
 
-Add a host alias to `~/.ssh/config`, so git uses this key for this repo only:
-
-```
-Host github-roll-call
-    HostName github.com
-    User git
-    IdentityFile ~/.ssh/roll_call_deploy
-    IdentitiesOnly yes
-```
-
-Point the runner clone's remote at the alias, then test a push without sending anything:
+Tell git to remember credentials for this clone only, then run a push that sends nothing:
 
 ```sh
 cd ~/roll-call-runner
-git remote set-url origin git@github-roll-call:lmansf/Manatee-Role-Call.git
+git config credential.helper store
+git config credential.useHttpPath true
 git push --dry-run origin main
 ```
 
-The first connection asks you to confirm GitHub's host key. Answer it now, because the timer
-can't. The dry run should end with "Everything up-to-date". A "read only" error means the key
-was added without write access.
+Git asks for a username and a password. Enter your GitHub username, and paste the token as
+the password. Git saves both to `~/.git-credentials`, a plain-text file only your user can
+read. Check that with `ls -l ~/.git-credentials`: the permissions should read `-rw-------`.
+The dry run should end with "Everything up-to-date". A 403 error means the token lacks
+"Read and write" on Contents, or was limited to a different repo.
+
+Run the same push again. It should not ask for anything this time, which is what the timer
+needs.
+
+### Give the runner clone a git identity
+
+The publish step makes commits, and git refuses to commit without a name and email:
+
+```sh
+git config user.name "Roll Call runner"
+git config user.email "you@example.com"
+```
+
+Use your own email, or the private noreply address GitHub shows under Settings, then Emails.
+This sets the identity for the runner clone only.
+
+### When the token expires
+
+The daily run's push starts failing, systemd marks the run failed, and after two days the
+dashboard shows its stale-data warning. To renew:
+
+1. On the token's page on GitHub, click Regenerate token, or create a new one with the same
+   settings. Copy it.
+2. Open `~/.git-credentials` in an editor and delete the line containing `github.com`.
+3. Run `git push --dry-run origin main` in the runner clone and paste the new token when asked.
 
 ## 3. Run each job by hand
 
@@ -187,3 +211,13 @@ catch-up rule already handles.
 ```sh
 systemctl --user disable --now roll-call.timer roll-call-backup.timer
 ```
+
+## Troubleshooting
+
+- **Publishing refuses to run.** The publish step only commits `dashboard/sources/roll_call/`
+  and `data/records/`. Any other changed or untracked file in the runner clone stops it, on
+  purpose. Run `git status` in `~/roll-call-runner` and remove or commit whatever is there.
+- **The pull before publishing fails.** It uses `git pull --ff-only`, which stops when the
+  runner clone and GitHub have diverged. That happens, for example, after a local commit whose
+  push failed. Run `git log origin/main..main` to see the stranded commit, then
+  `git pull --rebase` and push by hand.
