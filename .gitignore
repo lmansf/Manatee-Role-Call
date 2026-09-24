@@ -12,3 +12,5 @@ data/raw/
 data/*.duckdb
 data/*.duckdb.wal
 data/.run.lock
+# agent worktrees created by Claude Code; never part of the project
+.claude/worktrees/
