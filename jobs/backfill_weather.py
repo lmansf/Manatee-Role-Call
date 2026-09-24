@@ -1,12 +1,15 @@
-"""One-off: backfill the weather baseline from Open-Meteo reanalysis.
+"""One-off: backfill weather history from the Open-Meteo archive.
 
-Spec §5: backfill the initial baseline from reanalysis rather than waiting months.
-Pull in yearly chunks to keep each request small. Run once, then never again unless the
-baseline needs rebuilding.
+Feeds two things: training features for the historical seasons (2018-19 onward), and the
+weather baseline, which is the normal for each day of the year over the trailing 30 years
+(spec §5). The replayed baseline refreshes need history 30 years before the earliest replayed
+year, so backfill from about 1988.
 
-TODO(you): implement once open question 2 (fields, forecasts) is decided. The field
-set chosen here is the field set the baseline is computed on; changing it later means
-re-backfilling, which is fine but should be a conscious act.
+Pull one calendar year per request to keep each raw payload small, and write through
+db.write_ingest_result like any other run. Run once; re-run only to rebuild.
+
+TODO(you): implement. The field set is fixed (open_meteo.DAILY_FIELDS, HOURLY_FIELDS).
+Changing it later means re-backfilling, which is fine but should be a conscious act.
 """
 from __future__ import annotations
 

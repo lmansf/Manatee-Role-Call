@@ -35,13 +35,18 @@ USER_AGENT = "roll-call-pipeline (portfolio project; contact via GitHub)"
 
 @dataclass
 class SightingReport:
-    """One parsed report. `count` is None when the report says no count was taken."""
+    """One parsed report entry. Counts are None when that counter reported nothing."""
 
     report_date: date
     # Researchers and park staff count separately and both numbers are usually reported.
-    # Keep both; the gap between them is a distribution-check feature, not noise.
-    count_smc: int | None
+    # The researchers' count is the target; the park count is its own series, and the gap
+    # between them is monitored as counter disagreement (CONTEXT.md).
+    count_researchers: int | None
     count_park: int | None
+    # "Not counted": the report says no roll call took place. Distinct from a zero count.
+    not_counted: bool
+    # The researchers called their number an estimate. Still a count, still the target.
+    is_estimate: bool
     river_temp_f: float | None
     spring_temp_f: float | None
     post_url: str
@@ -52,8 +57,10 @@ class SightingReport:
     def to_record(self) -> dict[str, Any]:
         return {
             "report_date": self.report_date,
-            "count_smc": self.count_smc,
+            "count_researchers": self.count_researchers,
             "count_park": self.count_park,
+            "not_counted": self.not_counted,
+            "is_estimate": self.is_estimate,
             "river_temp_f": self.river_temp_f,
             "spring_temp_f": self.spring_temp_f,
             "post_url": self.post_url,
@@ -90,8 +97,9 @@ def parse_report(html: str, post_url: str) -> SightingReport:
          qualified by "additional" or "new" is not a roll call total; don't store it as one.
       3. Temperatures. Written as °F with °C in parentheses, sometimes with "~". Parse the
          °F figure; use the °C only as a cross-check.
-      4. The "no count today" case. Return count=None, not 0. Zero manatees is data;
-         no count is absence of data, and the volume check needs to tell them apart.
+      4. The "no roll call today" case. Set not_counted=True and leave both counts None,
+         never 0. Zero manatees is data; not counted is absence of data, and the checks
+         need to tell them apart (CONTEXT.md: Counted / Not counted / Unreported).
          Off-season monthly updates (April, June, August) carry no roll call at all.
 
     Resist a single giant regex. Several small, named ones fail in more legible ways.

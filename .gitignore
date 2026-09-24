@@ -8,3 +8,7 @@ secrets/
 service-account*.json
 # cached third-party pages; re-fetchable, not ours to redistribute
 data/raw/
+# the database and its lock; backed up by jobs/backup_db.py, not by git
+data/*.duckdb
+data/*.duckdb.wal
+data/.run.lock

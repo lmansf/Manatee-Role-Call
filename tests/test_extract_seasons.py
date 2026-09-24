@@ -45,32 +45,32 @@ def test_entries_found_and_nav_and_intro_ignored():
 
 def test_two_counts_attributed():
     r = rows()
-    assert (r["2024-01-16"]["count_smc"], r["2024-01-16"]["count_park"]) == ("186", "191")
-    assert (r["2024-01-17"]["count_smc"], r["2024-01-17"]["count_park"]) == ("677", "687")
+    assert (r["2024-01-16"]["count_researchers"], r["2024-01-16"]["count_park"]) == ("186", "191")
+    assert (r["2024-01-17"]["count_researchers"], r["2024-01-17"]["count_park"]) == ("677", "687")
     assert r["2024-01-16"]["needs_review"] == "FALSE"
     assert "Lily" in r["2024-01-16"]["entry_text"]
 
 
 def test_additional_is_not_a_total():
     r = rows()["2023-11-30"]
-    assert r["count_smc"] == "" and r["additional"] == "32"
+    assert r["count_researchers"] == "" and r["additional"] == "32"
     assert r["air_temp_f"] == "46" and r["river_temp_f"] == "69.4"
     assert r["needs_review"] == "TRUE"
 
 
 def test_no_count_is_not_zero_and_not_flagged():
     r = rows()["2023-12-04"]
-    assert r["no_count"] == "TRUE" and r["count_smc"] == "" and r["needs_review"] == "FALSE"
+    assert r["no_count"] == "TRUE" and r["count_researchers"] == "" and r["needs_review"] == "FALSE"
 
 
 def test_single_count_and_ordinal_degree_sign():
     r = rows()["2023-12-05"]
-    assert r["count_smc"] == "51" and r["river_temp_f"] == "70.3" and r["needs_review"] == "FALSE"
+    assert r["count_researchers"] == "51" and r["river_temp_f"] == "70.3" and r["needs_review"] == "FALSE"
 
 
 def test_count_verb_without_word_manatees():
     r = rows()["2024-01-18"]
-    assert r["count_smc"] == "493" and r["river_temp_f"] == "63.5"
+    assert r["count_researchers"] == "493" and r["river_temp_f"] == "63.5"
 
 
 def test_derived_count_flagged_not_computed():
@@ -93,11 +93,11 @@ def test_mislabelled_page_flags_every_row():
 def test_estimate_phrasing_is_a_count_marked_estimate():
     r = es.extract(es.Entry(date(2025, 12, 31), "Only a low estimate of 477 was possible. The park counted 670."),
                    "2025-2026", "x")
-    assert (r["count_smc"], r["count_park"], r["estimate"]) == ("477", "670", "TRUE")
+    assert (r["count_researchers"], r["count_park"], r["estimate"]) == ("477", "670", "TRUE")
 
 
 def test_researcher_and_park_counts_in_one_sentence():
     r = es.extract(es.Entry(date(2025, 2, 1),
                             "Park staff counted 34 manatees one morning while a researcher counted 38."),
                    "2024-2025", "x")
-    assert (r["count_smc"], r["count_park"]) == ("38", "34")
+    assert (r["count_researchers"], r["count_park"]) == ("38", "34")

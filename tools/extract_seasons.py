@@ -57,7 +57,7 @@ SEASONS: dict[str, list[str]] = {
 }
 
 COLUMNS = [
-    "season", "date", "count_smc", "count_park", "count_other", "estimate", "additional",
+    "season", "date", "count_researchers", "count_park", "count_other", "estimate", "additional",
     "derived", "no_count", "river_temp_f", "air_temp_f", "needs_review", "review_reason",
     "source_url", "entry_text",
 ]
@@ -243,13 +243,13 @@ def extract(entry: Entry, season: str, source_url: str) -> dict:
     unattributed = [c for c in totals if c.who is None]
     ambiguous = [c for c in totals if c.who == "ambiguous"]
 
-    count_smc = smc[0] if smc else (unattributed.pop(0) if unattributed else None)
+    count_researchers = smc[0] if smc else (unattributed.pop(0) if unattributed else None)
     count_park = park[0] if park else None
     others = smc[1:] + park[1:] + unattributed + ambiguous
 
     no_count = bool(NO_COUNT.search(text))
     derived = bool(DERIVED.search(text))
-    estimate = any(c.estimate for c in (count_smc, count_park) if c) or bool(ESTIMATE_ANY.search(text))
+    estimate = any(c.estimate for c in (count_researchers, count_park) if c) or bool(ESTIMATE_ANY.search(text))
     river = _first_temp(RIVER_TEMP, text)
     air = _first_temp(AIR_TEMP, text)
 
@@ -259,11 +259,11 @@ def extract(entry: Entry, season: str, source_url: str) -> dict:
         reasons.append("count attribution ambiguous")
     if derived:
         reasons.append("count written as a sum (name + N others)")
-    if not count_smc and not count_park and not no_count:
+    if not count_researchers and not count_park and not no_count:
         reasons.append("only an 'additional' count" if additional else "no count found")
-    if no_count and (count_smc or count_park):
+    if no_count and (count_researchers or count_park):
         reasons.append("says no count but has a number")
-    for c in (count_smc, count_park):
+    for c in (count_researchers, count_park):
         if c and c.value > 1500:
             reasons.append(f"implausible count {c.value}")
     if river is not None and not 50 <= river <= 80:
@@ -275,7 +275,7 @@ def extract(entry: Entry, season: str, source_url: str) -> dict:
     return {
         "season": season,
         "date": entry.date.isoformat(),
-        "count_smc": v(count_smc),
+        "count_researchers": v(count_researchers),
         "count_park": v(count_park),
         "count_other": "|".join(v(c) for c in others),
         "estimate": str(estimate).upper(),
@@ -370,7 +370,7 @@ def score() -> int:
         if not rows:
             missing.append(ref["date"])
             continue
-        column = "count_park" if ref["count_source"] == "Park staff" else "count_smc"
+        column = "count_park" if ref["count_source"] == "Park staff" else "count_researchers"
         got = {r[column] for r in rows}
         if ref["count"] in got:
             agree += 1
@@ -414,7 +414,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         rows = extract_season(season, html, url)
         path = write_csv(season, rows)
-        counted = sum(bool(r["count_smc"] or r["count_park"]) for r in rows)
+        counted = sum(bool(r["count_researchers"] or r["count_park"]) for r in rows)
         review = sum(r["needs_review"] == "TRUE" for r in rows)
         print(f"{season}: {len(rows)} entries, {counted} with a count, {review} need review -> {path.relative_to(ROOT)}")
         if not rows:

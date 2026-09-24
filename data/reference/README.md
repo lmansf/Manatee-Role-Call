@@ -20,7 +20,7 @@ sighting-update posts (the first season published in that format; see `docs/sour
 
 Use:
 
-- **Parser scoring.** Once `parse_report` runs against the 2025–26 posts, its `count_smc`
+- **Parser scoring.** Once `parse_report` runs against the 2025–26 posts, its `count_researchers`
   and `count_park` should reproduce this table. Disagreements are parser bugs or
   transcription errors; either way, record which.
 - **Test days worth targeting.** 2025-11-01 (birth after roll call, derived count),

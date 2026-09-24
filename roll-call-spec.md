@@ -1,23 +1,28 @@
 # Roll Call — project spec
 
-A data pipeline whose real subject is the **data-quality layer**. The manatee forecast
-is the excuse; the point of the project is catching a source that changes underneath you.
+A data pipeline whose real subject is the **data-quality layer**. The manatee prediction is the
+excuse; the point of the project is catching a source that changes underneath you.
+
+Vocabulary is defined in [`CONTEXT.md`](CONTEXT.md) and used strictly here: *count*, *counter*,
+*roll call*, *forecast* (weather only) and *prediction* (the model's output) mean exactly what
+the glossary says. Decisions that were hard to reverse or surprising are recorded in
+[`docs/adr/`](docs/adr/). Source endpoints and scraping notes are in
+[`docs/sources.md`](docs/sources.md).
 
 ---
 
-## Kickoff prompt (paste this to the coding agent)
+## Kickoff prompt (for a fresh coding session)
 
-> I'm building a portfolio data project called **Roll Call**. It's a Python pipeline on
-> Databricks (free edition, Delta tables) that predicts daily manatee counts at Blue Spring
-> State Park from weather data — but the real focus is the data-quality and observability
-> layer wrapped around it: freshness, volume and distribution checks, a quarantine table for
-> anomalies, and a Tableau Public dashboard fed via Google Sheets.
+> I'm building a portfolio data project called **Roll Call**: a Python pipeline, run daily by a
+> systemd timer on my Ubuntu machine and storing everything in one DuckDB file, that predicts
+> tomorrow's manatee count at Blue Spring State Park from weather and river temperature. The
+> real focus is the data-quality layer around it: freshness, volume and consistency checks,
+> quarantine for doubtful observations, incidents for failing sources, and a Tableau Public
+> dashboard fed through Google Sheets.
 >
-> The full spec is in `roll-call-spec.md`. Read it, then help me build it in stages, starting
-> with the ingestion layer. I want to write the code myself where it's instructive — give me
-> the structure and let me fill in the logic, and flag the parts where you think I'd learn
-> more by hitting the problem first. Two design decisions are still open (marked in the spec)
-> — raise them when we get there rather than picking for me.
+> Read `roll-call-spec.md`, `CONTEXT.md` and `docs/adr/` first. I write the code myself where
+> it's instructive: give me structure, let me fill in the logic, and flag where I'd learn more
+> by hitting the problem first.
 
 ---
 
@@ -30,163 +35,160 @@ Deliverables: a GitHub repo, a Tableau Public dashboard, and a short written wal
 
 ## 2. Platform
 
-- **Compute/storage:** Databricks free edition, Delta tables.
-  Free-tier compute is time-limited — keep runs small.
-- **Language:** Python.
-- **Dashboard:** Tableau Public (free).
-- **Orchestration:** scheduled job. (Dagster is queued as a separate learning series and is
-  explicitly *not* part of this build.)
+See [ADR 0002](docs/adr/0002-local-scheduled-script-with-duckdb.md).
+
+- **Runs on:** the owner's Ubuntu machine, as a plain Python script.
+- **Schedule:** a systemd user timer at 19:00 local, `Persistent=true` so a run missed while the
+  machine was off or asleep fires when it's back. Setup: [`docs/scheduling.md`](docs/scheduling.md).
+- **Catch-up:** every run fetches everything since the last successful run for each source, not
+  just yesterday. A missed run therefore costs at most that day's weather forecast.
+- **Storage:** one DuckDB file. Every table a run touches is keyed so re-running is safe.
+- **Secrets:** a `.env` file in the repo folder, ignored by git. `.env.example` lists the keys.
+- **Backup:** clearing decisions and the baseline refresh log are exported as CSV and committed
+  (they are the records only a person could make). The whole database file is copied weekly to
+  a second disk by a second timer.
+- **Not used:** Databricks (outbound allowlist, quota shutdowns), GitHub Actions (owner's call),
+  Dagster (a separate learning series).
 
 ## 3. Data sources
 
-### 3.1 Open-Meteo (primary weather source)
-- Free, no API key, global coverage (~11 km, finer where regional models exist).
-- Blends ECMWF, GFS, ICON and others.
-- Historical reanalysis goes back decades — **use it to backfill the baseline** rather than
-  waiting months to accumulate one.
-- **Decided (2026-09-20): fields and forecasts.**
-  - Daily, from the archive endpoint: `temperature_2m_min`, `temperature_2m_max`,
-    `temperature_2m_mean`, `precipitation_sum`, `wind_speed_10m_max`,
-    `shortwave_radiation_sum`. Each has a named mechanism (air temp as the river-temp proxy;
-    rain cools the run and cancels counts; wind mixes and cools; solar drives recovery after
-    a cold snap). Humidity, pressure, cloud cover and apparent-temperature variants are
-    deliberately left out.
-  - Hourly `temperature_2m` alongside, because degree-hours below 20°C and consecutive cold
-    hours can't be computed honestly from a daily min/max. Bonus: a daily mean recomputed
-    from the hourly series should match the API's `temperature_2m_mean` within rounding —
-    a free consistency check on the source.
-  - Units pinned explicitly on every call (`celsius`, `mm`, `kmh`); `daily_units` and
-    `hourly_units` persisted with the raw payload so the unit-change check has a reference.
-  - **Forecasts: yes, separate table, not a model input at first.** Each daily run pulls the
-    7-day daily forecast for the same fields, keyed by issue date and target date. The
-    driving reason is train/serve skew: a model that predicts tomorrow's count needs
-    tomorrow's weather, and that is a forecast. Revision drift between issues for the same
-    target date is the distribution check's real, un-manufactured drift. Stage 3 decides
-    whether the model consumes forecasts.
-  - Observations come from the archive only. The forecast endpoint's `past_days` serves
-    recent days from a different model; mixing them puts a step change at the most recent
-    week. Accept the ~5 day archive lag.
+### 3.1 Save the Manatee Club reports (the counts)
 
-### 3.2 Blue Spring manatee counts (the modelling target)
-- Park staff run a daily count each morning during manatee season (~November to mid-March).
-  Counts range from a few dozen to 700+.
-- Published as **sighting reports on Save the Manatee Club's site — HTML blog posts, no API.**
-  This is deliberate: a scraped page is exactly the kind of source that changes format
-  silently, which is what the quality layer exists to catch.
-- Reports frequently include **river temperature** alongside the count, so part of the join
-  arrives in the same record.
-- The season has a hard on/off, which makes it good material for freshness and volume checks.
+- The researchers' daily roll call during the season, published as prose on season pages; the
+  current season lives on the hub page until archived. Scraped, no API. This is deliberate: a
+  scraped page is the source most likely to change silently.
+- Each report can give two counts, the researchers' and the park's, plus the report temperature.
+- Historical seasons 2018–19 onward are extracted once by `tools/extract_seasons.py` into one
+  CSV per season, reviewed, then aggregated (aggregation rule still open, §8).
+- A hand-transcribed 2025–26 set in `data/reference/` scores the extraction. It is never a source.
 
-### 3.3 FWC synoptic surveys (optional statewide layer)
-- Available as CSV with a GeoServices/WMS/WFS API via `geodata.myfwc.com`.
-- Only a handful of aerial flights per winter — **too sparse to model against.** Use as
-  context or a statewide baseline only.
+### 3.2 Open-Meteo (weather)
+
+- **Archive** (ERA5 reanalysis, ~5-day lag): the only source of observed air weather. Feeds
+  training features and weather baselines. Six daily fields plus hourly temperature, units
+  pinned (see `docs/sources.md` §1).
+- **Forecast:** the 7-day daily forecast for the same fields, stored every run with its issue
+  date. Feeds live predictions. Forecast revisions between issues are genuine drift.
+- The live run never uses observed air weather; the archive lag makes yesterday's unavailable.
+
+### 3.3 USGS gauge 02236000, St. Johns River near DeLand (river temperature)
+
+- Continuous water temperature about 7 km downstream of the park, including weekends, with
+  years of history. It is the model's river temperature input.
+- The report temperature becomes a cross-check between two independent sources.
+- Values are published as provisional and later approved; revisions are recorded, not
+  overwritten, like forecast revisions.
 
 ### 3.4 Synthetic mutation generator (test fixture)
-- Generates data with **built-in variable mutation**: schema drift, null spikes, unit changes,
-  duplicates, renamed keys.
-- Points at *copies*, never the real tables. Its job is to prove every check actually fires.
-- Accepted trade-off: it's a closed loop (you wrote the bug and the detector), which is why
-  it sits alongside a real source rather than replacing one.
-- **Decided (2026-09-20):** a standalone, on-demand script. Invoked by hand with a target
-  table argument. It must refuse to run against anything that isn't a copy (a name-prefix
-  guard is the minimum). Rationale: a deploy-time suite would run against fixtures, which
-  closes the loop even tighter; an on-demand script at least exercises the real check code
-  against real Delta tables.
+
+- A standalone script run on demand (`tools/mutate.py`). It works on a *copy* of the database
+  file and refuses the live one.
+- Mutations: schema drift, null spikes, unit changes, duplicates, renamed keys. Its job is to
+  prove every check fires. Accepted trade-off: it is a closed loop, which is why real sources
+  sit beside it.
+
+### 3.5 Out of the first version
+
+- Florida's statewide aerial surveys (FWC). One to three flights a winter: context only, and a
+  fourth source to watch for no model benefit. Endpoints kept in `docs/sources.md`.
 
 ## 4. The model
 
-Predict daily manatee count at Blue Spring from weather.
-
-- Manatees aggregate at warm-water refuges when ambient water drops below roughly 20°C —
-  a genuine **threshold effect** rather than a smooth relationship. Worth modelling explicitly
-  (e.g. degree-hours below threshold, consecutive cold days) rather than raw daily temperature.
-- Note: Blue Spring is a **natural spring at a constant ~72°F**, not a power plant outflow.
-  Same physics, different story — don't describe it as industrial warm water.
-- Reuse the lag/calendar feature approach from the existing attendance model where it fits.
+- **Target:** the researchers' count. Park counts are never substituted. Estimates are included
+  and flagged, so scores can be computed with and without them. Counts written as sums are
+  ordinary counts.
+- **Prediction:** tomorrow's count, for every calendar day of an open season. Scored only on days
+  that turn out counted.
+- **Model:** a count regression (Poisson or negative binomial) with hand-picked features. Feature
+  selection stays manual so the performance history stays readable.
+- **Features:** today's (or the last) count, days since the last count, gauge temperature and its
+  recent trend, degree-hours below 20°C (river and forecast air), and tomorrow's forecast. Reuse
+  the lag and calendar features from the owner's attendance model where they fit.
+- **Physics note:** Blue Spring is a natural spring at a constant ~72°F. Manatees gather when the
+  river drops below roughly 20°C, a threshold effect worth modelling explicitly.
+- **Training data vs live inputs:** training stands in archive air weather for forecasts; the size
+  of that mismatch is measurable from forecast history since 2024.
 
 ### Retraining
-- **Trigger on model performance, not on data-quality flags.** Error on recent predictions
-  exceeding a threshold means the world changed and the model should follow.
-- Quality flags must *not* trigger retraining — that would point the model at exactly the
-  data just quarantined, and retrain on the noisiest days by design. Flags **gate the
-  training set**; performance **triggers the retrain**.
-- **Feature selection stays manual.** Automated selection on every run means the feature set
-  changes for reasons that can't be reconstructed later, which makes the performance history
-  unreadable.
+
+- **Triggered by performance, never by quality flags.** Retrain when the model does worse than
+  persistence over the last 10 scored predictions, and once a year at season close.
+- Quarantined observations are excluded from training until cleared. Flags gate the training
+  set; performance triggers the retrain.
 
 ## 5. The quality layer
 
-Three domains:
+### Checks
 
 | Domain | Checks |
 |---|---|
-| **Freshness** | Last successful run per source; expected-vs-actual arrival; season-aware (Blue Spring goes quiet Mar–Nov by design, not by failure). |
-| **Volume** | Row counts per run vs baseline; duplicate-match rejection; join row-count retention. |
-| **Distribution** | Null rate per column; value ranges; mean/spread vs baseline; unit-change detection. |
+| **Freshness** | Last successful run per source. Season-aware: the season opens at the first report; no opening after the latest plausible start is an incident; the season closes after five silent weekdays once March begins. Unreported weekends are normal. |
+| **Volume** | Rows per run against expectation; duplicate rejection; join retention between counts, weather and gauge by date. |
+| **Distribution** | Null rate per column; units against the pinned units. Weather fields: beyond three standard deviations of the 30-year normal for that day of the year. |
+| **Counts** | Not judged by standard deviations ([ADR 0001](docs/adr/0001-counts-not-judged-by-standard-deviations.md)). Plausible range, and jumps that contradict the river temperature. Counter disagreement is monitored, never a reason to quarantine. |
+| **Cross-source** | Report temperature against gauge temperature. |
 
-Structural checks (column set vs expected) catch schema drift. They do **not** catch the
-nastier cases — a renamed club/site silently dropping joined rows, or a column that was always
-populated starting to arrive null — which is what the value-level checks above are for.
+Structural checks catch schema drift. Value-level checks catch the nastier cases: a column that
+was always populated arriving null, or a renamed field silently dropping joined rows.
 
-**Join keys:** use surrogate keys on stable identifiers, never on display names.
+**Join keys:** surrogate keys on stable identifiers (site, date, counter), never display names.
+
+**Thresholds** start as placeholders (latest plausible start 15 November, five silent weekdays,
+counts 0–1,500) and are calibrated from the historical seasons once extracted.
 
 ### Baselines
-- **Fixed baseline, refreshed on a schedule** — not a rolling window. A rolling window absorbs
-  slow drift until it silently becomes the new normal.
-- At every refresh, **log old and new baseline side by side.** Without this, a scheduled
-  refresh quietly reinvents the rolling window — the drift just gets absorbed in steps.
-- Backfill the initial baseline from Open-Meteo reanalysis.
 
-### Flagging and quarantine
-- Anomalies → **quarantine/review table**. Never silently dropped, never auto-deleted.
-- Quarantined rows are **held out of model training until a human clears or confirms them**.
-- Rule of thumb for the threshold: values beyond ~3 SD from that source's baseline.
-- A big number is not automatically bad data — verify against the world before calling it
-  wrong (an unusual count may be real). Record the decision either way.
+- Fixed, refreshed once a year at season close. Never mid-season: a refresh would absorb the
+  cold-snap behaviour the checks watch for.
+- Weather baseline: the normal for each day of the year over the trailing 30 years.
+- Every refresh logs old and new side by side. Without this, a scheduled refresh quietly becomes
+  a rolling window.
+- Past years are replayed with the live rule and labelled as replayed, so the drift history
+  starts where the data does.
+
+### Quarantine, incidents and clearing
+
+- A doubtful observation is **quarantined**: kept, never dropped, held out of training.
+- A failing source-level check opens an **incident**, which closes itself when the check passes.
+- The owner **clears** quarantined observations in a local Jupyter notebook: confirmed real or
+  rejected, with a reason, written to the database. A big number is not automatically bad data.
 
 ### Alerting
-- Email on every flag.
-- **SendGrid** if its free tier still covers the volume — the free allowance shrank a while
-  back, so check current limits. **Amazon SES** is the fallback.
+
+- Resend (permanent free tier: 3,000 a month, 100 a day). SendGrid retired its free plan in 2025.
+- One email per run, only when something new opened, listing new incidents and new quarantined
+  observations.
 
 ## 6. Dashboard
 
-**Tableau Public cannot connect to databases or warehouses** — only flat files, Google Sheets,
-JSON, spatial files and web data connectors. That's a security limit (everything saved to
-Tableau Public is public), and it also rules out the `.taco` connector route, which needs
-paid Desktop.
+**Tableau Public cannot connect to databases**, only flat files, Google Sheets and a few others,
+because everything saved to it is public.
 
-**The path:**
-1. The Databricks job computes check summaries in Python.
-2. It writes them to **Google Sheets** via `gspread` with a service account (share the sheet
-   with the service account's email like a normal collaborator).
-3. Tableau Public connects to the Sheet and refreshes on a schedule.
+**The path:** each run computes check summaries in Python and writes them to a Google Sheet via
+`gspread` with a service account (share the sheet with its email). Tableau Public reads the sheet
+and refreshes on its own schedule.
 
-**Write summaries, not raw logs.** One row per source per run, metrics already computed.
-Keeps the sheet small and stops Tableau doing the aggregation.
+**Write summaries, not raw logs:** one row per source per run, metrics precomputed.
 
-**Tableau Public is public — keep anything identifying out of those rows.**
+**Public by design:** the sheet carries dates, check names, values, statuses and ages only.
+Report text names people and never goes there.
 
 ### Views
-1. **Drift over time (cumulative).** Prefer *cumulative signed change in the baseline* over a
-   simple count of drift events — that's what exposes a source that has crept 20% over six
-   months while no single refresh looked alarming.
-2. **Per-source status.** Last successful run, row count vs norm, null rate vs norm.
-3. **Quarantine queue.** Open items and time-to-clear — the metric that proves the loop closes.
+
+1. **Drift over time (cumulative).** Cumulative signed change in each baseline across refreshes,
+   including replayed years.
+2. **Per-source status.** Last successful run, rows against expectation, null rate against normal.
+3. **Quarantine queue.** Open items and time to clear, the metric that proves the loop closes.
 
 ## 7. Naming
 
-**Roll Call** — what the Blue Spring morning count is actually called, and what the pipeline
-does daily: check who's there, flag what's missing.
+**Roll Call**: what the Blue Spring morning count is called, and what the pipeline does daily.
 
-Rejected: **Manatee Watch** — already the name of Volusia County Environmental Management's
-volunteer program (running since 2005), in the same county as Blue Spring. Too easy to
-mistake for an official project.
+Rejected: **Manatee Watch**, already the name of Volusia County Environmental Management's
+volunteer program, in the same county as Blue Spring.
 
-## 8. Open questions
+## 8. Open, pending data
 
-1. ~~Where the mutation generator lives~~ — decided: standalone on-demand script (§3.4).
-2. ~~Which Open-Meteo fields to pull, and whether to include revisable forecasts~~ — decided (§3.1).
-
-None open.
+1. How to aggregate the per-season CSVs into one history.
+2. Threshold values (see §5).
+3. Which features carry over from the attendance model.

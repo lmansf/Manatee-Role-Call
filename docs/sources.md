@@ -1,9 +1,14 @@
 # Data sources: calls and site notes
 
-Researched 2026-09-22. The sandbox this was written in cannot reach any of these hosts,
-so every call below is documented from official docs and search results, not executed.
-Items marked **verify** need one manual call before they are trusted. Run the smoke tests
-at the end first.
+Researched 2026-09-22, updated 2026-09-24. The sandbox this was written in cannot reach any
+of these hosts, so every call below is documented from official docs, client source code and
+search results, not executed. Items marked **verify** need one manual call before they are
+trusted. Run the smoke tests at the end first.
+
+Roles, per the spec: the reports give the counts and the report temperature; Open-Meteo's
+archive gives observed air weather for training and baselines, and its forecast feeds live
+predictions; the USGS gauge gives continuous river temperature. Florida's aerial surveys are
+out of the first version (§4).
 
 ## 1. Open-Meteo
 
@@ -20,7 +25,7 @@ payload (spec §3.1).
 Defaults to override on every call: `timezone` defaults to GMT; `cell_selection` defaults
 to `land` (fine for Blue Spring); `models` defaults to `best_match`.
 
-### 1a. Archive (observations, the only source of observations)
+### 1a. Archive (the only source of observed air weather)
 
 ```
 GET https://archive-api.open-meteo.com/v1/archive
@@ -162,8 +167,9 @@ sentences until real fixtures are saved:
 Parser consequences:
 
 1. **Two counts per day are common.** Save the Manatee Club's researchers and park staff
-   count separately and both numbers get reported. Store both (`count_smc`, `count_park`)
-   rather than picking one. The gap between them is itself a distribution-check feature.
+   count separately and both numbers get reported. Store both (`count_researchers`,
+   `count_park`). The researchers' count is the target; the gap between them is monitored
+   as counter disagreement (see `CONTEXT.md`).
 2. **"Additional" is not a total.** "32 additional manatees" means newly seen animals,
    not the roll call. Treat any count qualified by "additional", "new" or "more" as a
    different field or discard it.
@@ -174,14 +180,12 @@ Parser consequences:
 5. Dates: the format inside a page is not confirmed from snippets. Expect a heading or a
    bold lead-in per day. This is the first thing to look at in a saved fixture.
 
-### A second count source worth checking
+### The park's own page is not a source
 
-Park staff are reported to post the morning count to Blue Spring's own manatee page,
-`https://www.floridastateparks.org/parks-and-trails/blue-spring-state-park/manatees-blue-spring-state-park`,
-and to social media under `#manateecount`. **verify** whether that page carries a
-machine-readable current count. If it does, it is a cleaner primary for `count_park`
-and the Save the Manatee Club page becomes the source for `count_smc` and river
-temperature. Social posts are not a source: no API, no history.
+Park staff post a morning count to Blue Spring's page on floridastateparks.org and to social
+media under `#manateecount`. Checked by the owner: the page is blog-style prose with several
+numbers per post, no cleaner than the reports, and the park count already appears in most
+reports. Not ingested.
 
 ### Politeness
 
@@ -190,7 +194,49 @@ at most one fetch of each season or month page per day. During the season a sing
 changes daily; out of season nothing changes for months, and the freshness check should
 know that (spec §5).
 
-## 3. FWC synoptic surveys (optional context)
+## 3. USGS gauge 02236000: St. Johns River near DeLand
+
+Continuous river temperature about 7 km downstream of the park (the gauge sits under the
+State Road 44 bridge). USGS parameter code `00010` is water temperature in °C; daily
+statistic `00003` is the daily mean.
+
+Use the new Water Data API. The legacy `waterservices.usgs.gov` service is being retired,
+with the legacy APIs going in late 2026 or early 2027; don't build on it.
+
+```
+GET https://api.waterdata.usgs.gov/ogcapi/v0/collections/daily/items
+  ?monitoring_location_id=USGS-02236000
+  &parameter_code=00010
+  &statistic_id=00003
+  &time=2024-11-01/2025-03-31
+  &f=json
+
+GET https://api.waterdata.usgs.gov/ogcapi/v0/collections/continuous/items
+  ?monitoring_location_id=USGS-02236000
+  &parameter_code=00010
+  &time=P7D
+  &f=json
+```
+
+- Parameter names confirmed from USGS's own Python client (`dataretrieval`,
+  `waterdata.get_daily`). Responses are GeoJSON feature collections; each feature's
+  `properties` carries `time`, `value`, `unit_of_measure` and `approval_status`.
+- Works without a key at a lower rate limit. A free key is sent as the `X-Api-Key`
+  header; put it in `.env` as `API_USGS_PAT` if limits bite.
+- `approval_status` is **Provisional** for recent values and **Approved** once USGS has
+  reviewed them, sometimes with changed values. Store each value with its status and
+  keep revisions rather than overwriting: like forecast revisions, it is real drift.
+- **verify** how far back the gauge's temperature record goes (discharge goes back decades;
+  temperature may be shorter), and whether `time` accepts `P7D` as shown or needs an
+  explicit interval.
+- The gauge is downstream of where the spring run joins the river, so it reads the river
+  with the spring's small, warm inflow mixed in, not the spring run itself. That is what the
+  model wants. Expect it to differ from the report temperature by
+  a steady offset; the cross-check watches for that offset changing, not for equality.
+
+## 4. FWC synoptic surveys (out of the first version)
+
+Not ingested in the first version (spec §3.5). Kept here for later.
 
 ArcGIS REST, no key. Aerial statewide counts, 1991 to present, one to three flights per
 winter.
@@ -213,7 +259,7 @@ GET https://gis.myfwc.com/mapping/rest/services/Open_Data/Manatee_Synoptic_Surve
   `https://myfwc.com/research/manatee/research/population-monitoring/synoptic-surveys/`.
   That summary, not the point observations, is what the dashboard context view needs.
 
-## 4. Smoke tests
+## 5. Smoke tests
 
 Run these from a machine that can reach the hosts. Each should return HTTP 200 and the
 noted shape. Save each response into `tests/fixtures/` as the first fixtures.
@@ -240,7 +286,12 @@ curl -s -A "roll-call-pipeline (portfolio project)" https://savethemanatee.org/b
 curl -s -A "roll-call-pipeline (portfolio project)" https://savethemanatee.org/manatee-sighting-reports-2024-2025/ \
   -o tests/fixtures/stmc_season_2024_2025.html
 
-# 5. FWC layer listing
+# 5. USGS gauge, last week of daily mean water temperature
+curl -s "https://api.waterdata.usgs.gov/ogcapi/v0/collections/daily/items?monitoring_location_id=USGS-02236000&parameter_code=00010&statistic_id=00003&time=$(date -d '-7 days' +%F)/$(date +%F)&f=json" \
+  -o tests/fixtures/usgs_daily_sample.json
+# expect: a FeatureCollection; features[].properties has time, value, approval_status
+
+# 6. FWC layer listing (only if the aerial surveys come back in scope)
 curl -s "https://gis.myfwc.com/mapping/rest/services/Open_Data/Manatee_Synoptic_Survey_Observation_Locations/MapServer/layers?f=pjson" \
   | python -c "import json,sys; print([(l['id'], l['name']) for l in json.load(sys.stdin)['layers']])"
 ```

@@ -21,11 +21,11 @@ first year) unless the text states one.
 
 | column | meaning |
 |---|---|
-| `count_smc` | Researchers' roll call. An unattributed single count lands here too, since the reports are the researchers' own. |
+| `count_researchers` | Researchers' roll call. An unattributed single count lands here too, since the reports are the researchers' own. |
 | `count_park` | Park staff count, when the text attributes a number to the park. |
 | `count_other` | Every further candidate number, `\|`-separated. Non-empty means review. |
 | `estimate` | `TRUE` when the count is described as an estimate or undercount. |
-| `additional` | "N additional/new manatees" figures. Not totals; never in `count_smc`. |
+| `additional` | "N additional/new manatees" figures. Not totals; never in `count_researchers`. |
 | `derived` | `TRUE` when the count is written as a sum ("Annie + 23 others"). Not computed. |
 | `no_count` | `TRUE` when the text says no roll call happened. Blank count here means absence, not zero. |
 | `river_temp_f`, `air_temp_f` | First Fahrenheit figure after "river" / "air temp". |
