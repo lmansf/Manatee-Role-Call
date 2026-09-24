@@ -1,0 +1,67 @@
+{
+  "_synthetic": "SYNTHETIC: hand-built for tests, not a saved API response. Shaped after the 'daily' fixture in USGS dataretrieval-python (tests/data/waterdata_ogc_fixtures.json). Replace with a real response from docs/sources.md smoke test 5 when the API is reachable.",
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "synthetic-0001",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -81.3833,
+          29.0089
+        ]
+      },
+      "properties": {
+        "approval_status": "Approved",
+        "last_modified": "2025-01-11T12:00:00+00:00",
+        "monitoring_location_id": "USGS-02236000",
+        "parameter_code": "00010",
+        "qualifier": null,
+        "statistic_id": "00003",
+        "time": "2025-01-06",
+        "time_series_id": "synthetic-ts-00010-00003",
+        "unit_of_measure": "degC",
+        "value": "16.9"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "synthetic-0002",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -81.3833,
+          29.0089
+        ]
+      },
+      "properties": {
+        "approval_status": "Approved",
+        "last_modified": "2025-01-11T12:00:00+00:00",
+        "monitoring_location_id": "USGS-02236000",
+        "parameter_code": "00010",
+        "qualifier": null,
+        "statistic_id": "00003",
+        "time": "2025-01-07",
+        "time_series_id": "synthetic-ts-00010-00003",
+        "unit_of_measure": "degC",
+        "value": "16.4"
+      }
+    }
+  ],
+  "numberReturned": 2,
+  "links": [
+    {
+      "rel": "self",
+      "type": "application/geo+json",
+      "title": "This document as GeoJSON",
+      "href": "https://api.waterdata.usgs.gov/ogcapi/v0/collections/daily/items?monitoring_location_id=USGS-02236000&parameter_code=00010&statistic_id=00003&time=2025-01-06/2025-01-10&limit=50000&f=json"
+    },
+    {
+      "rel": "next",
+      "type": "application/geo+json",
+      "title": "Items (next)",
+      "href": "https://api.waterdata.usgs.gov/ogcapi/v0/collections/daily/items?monitoring_location_id=USGS-02236000&parameter_code=00010&statistic_id=00003&time=2025-01-06/2025-01-10&limit=50000&f=json&cursor=synthetic-page-2"
+    }
+  ]
+}
