@@ -1,7 +1,7 @@
 # Roll Call
 
 A daily pipeline that watches the Blue Spring manatee counts and the weather around them,
-and predicts the counts. Its real subject is noticing when a source changes underneath it.
+and predicts the counts. Its subject is noticing when a source changes.
 
 ## Language
 
@@ -22,13 +22,13 @@ modelling target; the park count is a separate series.
 _Avoid_: total, sighting, "the number"
 
 **Estimate**:
-A count the researchers describe as approximate rather than tallied. Still a count, still the
-target, always marked as an estimate.
+A count the researchers describe as approximate rather than tallied. It is still a count and
+still the target, and it is always marked as an estimate.
 _Avoid_: guess, rough count
 
 **Counter disagreement**:
-The gap between the researchers' count and the park count at the same roll call. Watched over
-time as a measure of its own; a large gap says the counters differ, not which one is wrong.
+The gap between the researchers' count and the park count at the same roll call. It is watched
+over time as a measure of its own. A large gap says the counters differ, not which one is wrong.
 _Avoid_: discrepancy, error
 
 **Late arrivals**:
@@ -48,7 +48,7 @@ _Avoid_: water temp (ambiguous with the spring), temp
 A day with a count from the counter in question. Zero is a valid count.
 
 **Not counted**:
-A day whose report says no roll call took place. Absence of data, not zero.
+A day whose report says no roll call took place. It is an absence of data, not a zero.
 _Avoid_: zero day, missing
 
 **Unreported**:
@@ -70,13 +70,13 @@ Open-Meteo's prediction of future weather. Only ever weather.
 _Avoid_: using it for the model's output
 
 **Prediction**:
-The model's estimate of the researchers' count for the next calendar day. Made every day of an
-open season; scored only on days that turn out counted.
+The model's estimate of the researchers' count for the next calendar day. The model makes one
+every day of an open season. A prediction is scored only if its day turns out counted.
 _Avoid_: forecast, projection
 
 **Persistence**:
-The prediction that the next count equals the last count. The bar every prediction must beat;
-losing to it over recent scored predictions is what triggers a retrain.
+The prediction that the next count equals the last count. Every prediction must beat it. Losing
+to it over recent scored predictions triggers a retrain.
 _Avoid_: naive model, baseline (baseline means something else here)
 
 ### Watching
@@ -89,7 +89,7 @@ _Avoid_: norm, rolling average
 
 **Replayed refresh**:
 A baseline refresh computed after the fact for a past year, using exactly the live rule, and
-labelled as replayed. Gives the drift history its years before the pipeline existed.
+labelled as replayed. It gives the drift history its years before the pipeline existed.
 _Avoid_: backfilled baseline, simulated refresh
 
 **Quarantined observation**:
@@ -101,6 +101,6 @@ A person's recorded decision on a quarantined observation: confirmed real, or re
 reason.
 
 **Incident**:
-A failed source-level check, such as a stale or empty source. It has no rows to hold back; it is
-alerted, logged, and closes when the check passes again.
+A failed source-level check, such as a stale or empty source. It has no rows to hold back. The
+alert lists it, the database logs it, and it closes when the check passes again.
 _Avoid_: alert (the alert is the notification, not the thing)

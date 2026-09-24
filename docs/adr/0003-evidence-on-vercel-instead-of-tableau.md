@@ -13,10 +13,10 @@ builds on Vercel's side, so this adds no GitHub Actions.
 
 ## Considered options
 
-- Tableau Public with Google Sheets: rejected for the uncertain refresh path and the missing
+- Tableau Public with Google Sheets. Rejected for the uncertain refresh path and the missing
   Linux editor above. It also needed a Google service account and a sheet to share with it.
-- A hand-built React dashboard: rejected because the charts, the build and the hosting would all
-  be code to maintain for three views.
+- A hand-built React dashboard. Rejected because the charts, the build and the hosting would
+  all be code to maintain for three views.
 
 ## Consequences
 

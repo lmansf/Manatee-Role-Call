@@ -1,6 +1,6 @@
 # Scheduling on Ubuntu
 
-Two systemd **user** timers: the daily run at 19:00, and a weekly backup. Both are set to
+Two systemd user timers run the jobs: the daily run at 19:00, and a weekly backup. Both are set to
 `Persistent=true`, so a run missed while the machine was off or asleep fires as soon as it's
 back. Both jobs take the same lock file, so they can't open the database at the same time.
 
@@ -60,7 +60,7 @@ git push --dry-run origin main
 
 Git asks for a username and a password. Enter your GitHub username, and paste the token as
 the password. Git saves both to `~/.git-credentials`, a plain-text file only your user can
-read. Check that with `ls -l ~/.git-credentials`: the permissions should read `-rw-------`.
+read. Check that with `ls -l ~/.git-credentials`. The permissions should read `-rw-------`.
 The dry run should end with "Everything up-to-date". A 403 error means the token lacks
 "Read and write" on Contents, or was limited to a different repo.
 
@@ -91,8 +91,8 @@ dashboard shows its stale-data warning. To renew:
 
 ## 3. Run each job by hand
 
-Run each job once and confirm it succeeds before scheduling it. A job that fails by hand will
-also fail on the timer, just more quietly.
+Run each job once and confirm it succeeds before scheduling it. A job that fails by hand also
+fails on the timer, where the failure is easier to miss.
 
 ```sh
 cd ~/roll-call-runner
@@ -102,6 +102,8 @@ cd ~/roll-call-runner
 
 After the daily run, `git log -1` shows the data commit if the dashboard CSVs changed. Vercel
 then starts a new build of the site.
+
+To re-run a past day, pass its date: `.venv/bin/python jobs/ingest_daily.py --today YYYY-MM-DD`.
 
 ## 4. Create the unit files
 
@@ -197,13 +199,13 @@ before the shutdown. It fires within a minute or so of the next boot or wake.
 
 ## Waking the machine to run on time
 
-This is optional. A user timer can't wake a suspended machine: `WakeSystem=true` needs
-privileges only the system-wide service manager has. If you want the machine woken at 19:00,
+This is optional. A user timer can't wake a suspended machine, because `WakeSystem=true`
+needs privileges only the system-wide service manager has. If you want the machine woken at 19:00,
 install the daily timer as a system unit instead. Put the same two files in
 `/etc/systemd/system/`. In the service, add `User=<your username>` and replace `%h` with your
 full home path. In the timer, add `WakeSystem=true`. Then run
 `sudo systemctl enable --now roll-call.timer`. The machine still won't suspend itself again
-afterwards. Without this, a suspended machine simply runs the job when it wakes, which the
+afterwards. Without this, a suspended machine runs the job when it wakes, which the
 catch-up rule already handles.
 
 ## Turning it off
