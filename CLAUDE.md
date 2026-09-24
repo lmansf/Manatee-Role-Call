@@ -6,9 +6,10 @@ architecture is in `roll-call-spec.md`.
 
 ## Working agreement
 
-The owner writes the instructive logic. Code marked `TODO(owner)` is theirs: leave it
-unimplemented, and give it structure, tests to aim at, and a docstring naming the decisions it
-involves. Say where the owner would learn more by hitting a problem before reading the answer.
+`TODO(owner)` marks work that waits on something only the owner has: a decision, or real data
+such as a saved source response. Leave it in place and say exactly what it needs. Placeholder
+thresholds in `roll_call/config.py` and the quality modules wait on the historical seasons;
+calibrate them only from extracted data.
 
 ## Before you act
 
