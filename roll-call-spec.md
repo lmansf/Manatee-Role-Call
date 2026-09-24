@@ -162,8 +162,8 @@ See [ADR 0002](docs/adr/0002-local-scheduled-script-with-duckdb.md).
 - **Quality flags gate the training set.** A quarantined count stays out of training and
   scoring while it is open or rejected, and goes back in once it is confirmed
   (`roll_call/quality/gate.py`). A flag decides what the model trains on, and performance
-  decides when. The gate covers counts only. Quarantined weather values still reach the
-  training features.
+  decides when. Quarantined weather values are gated the same way. An open or rejected archive
+  value counts as missing, so a training row that needs it is left out.
 
 ## 5. The quality layer
 

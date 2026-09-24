@@ -1,4 +1,4 @@
-"""The training gate keeps open and rejected quarantined counts out of training."""
+"""The training gate keeps open and rejected quarantined counts and weather values out of training."""
 from datetime import date
 
 import duckdb
@@ -45,3 +45,35 @@ def test_gate_with_an_alias(con):
 
 def test_obs_id_format():
     assert gate.obs_id(date(2026, 1, 2)) == "blue_spring_counts_daily:2026-01-02"
+
+
+def _quarantine_weather(con, day, measure):
+    key = f"{day.isoformat()}:{measure}"
+    con.execute("INSERT INTO quarantine (obs_id, source, table_name, obs_key, observation_date, "
+                "check_name) VALUES (?, 'open_meteo_archive', 'weather_daily', ?, ?, "
+                "'weather_normal')", [f"weather_daily:{key}", key, day])
+    return f"weather_daily:{key}"
+
+
+def test_held_out_weather_is_open_and_rejected_values(con):
+    _quarantine_weather(con, date(2026, 1, 1), "temperature_2m_min")        # open
+    clearing.decide(con, _quarantine_weather(con, date(2026, 1, 2), "temperature_2m_mean"),
+                    "rejected", "Sensor fault.")
+    clearing.decide(con, _quarantine_weather(con, date(2026, 1, 3), "temperature_2m_min"),
+                    "confirmed", "A real cold front.")
+    # The quarantined counts on Jan 2 to 4 and the measure-less weather row are not weather pairs.
+    assert gate.held_out_weather(con) == {
+        (date(2026, 1, 1), "temperature_2m_min"),
+        (date(2026, 1, 2), "temperature_2m_mean"),
+    }
+
+
+def test_held_out_weather_without_a_quarantine_table():
+    c = duckdb.connect(":memory:")
+    assert gate.held_out_weather(c) == set()
+    c.close()
+
+
+def test_weather_obs_id_format():
+    assert (gate.weather_obs_id(date(2026, 1, 2), "temperature_2m_min")
+            == "weather_daily:2026-01-02:temperature_2m_min")

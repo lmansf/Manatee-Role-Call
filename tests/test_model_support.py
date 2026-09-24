@@ -82,6 +82,7 @@ def install_fake_quality(monkeypatch, season: FakeSeason) -> None:
     gate = types.ModuleType("roll_call.quality.gate")
     gate.training_mask_sql = (
         lambda: "report_date NOT IN (SELECT observation_date FROM test_held_out)")
+    gate.held_out_weather = lambda con: set()
     season_mod = types.ModuleType("roll_call.quality.season")
     season_mod.is_open = season.is_open
     monkeypatch.setitem(sys.modules, "roll_call.quality.gate", gate)
