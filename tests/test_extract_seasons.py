@@ -101,3 +101,9 @@ def test_researcher_and_park_counts_in_one_sentence():
                             "Park staff counted 34 manatees one morning while a researcher counted 38."),
                    "2024-2025", "x")
     assert (r["count_researchers"], r["count_park"]) == ("38", "34")
+
+
+def test_tool_uses_the_pipeline_parser():
+    from roll_call.ingest import blue_spring
+    assert es.parse_date_lead is blue_spring.parse_date_lead
+    assert es.Entry is blue_spring.Entry
