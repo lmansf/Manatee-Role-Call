@@ -1,13 +1,15 @@
 """The dashboard export, against a throwaway DuckDB file."""
 import csv
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import duckdb
 import pytest
 
 from roll_call.export import dashboard
 from roll_call.ingest.base import IngestRun
+from roll_call.quality import baselines, clearing
 from roll_call.storage import db
+from tests.test_clearing import QUARANTINE_DDL
 
 NOW = datetime(2026, 1, 7, 0, 30, tzinfo=timezone.utc)
 
@@ -143,3 +145,87 @@ def test_meta_follows_data_and_code_changes(con, tmp_path):
     changed = dashboard.export(con, out, git_sha="def5678", now=latest)
     assert [p.name for p in changed] == ["source_status.csv", "meta.csv"]
     assert read_rows(out / "meta.csv")[0]["generated_at_utc"] == "2026-01-09T00:30:00Z"
+
+
+# Baseline drift and the quarantine queue.
+
+
+@pytest.fixture
+def quality(con):
+    """The fixture database plus a refresh log, a quarantine and two clearing decisions."""
+    baselines.ensure_tables(con)
+    for row in (
+        (date(2024, 4, 1), True, "open_meteo_archive", "temperature_2m_min", None, 10.0),
+        (date(2025, 4, 1), True, "open_meteo_archive", "temperature_2m_min", 10.0, 10.25),
+        (date(2026, 3, 20), False, "open_meteo_archive", "temperature_2m_min", 10.25, 10.1),
+        (date(2025, 4, 1), True, "open_meteo_archive", "precipitation_sum", None, 2.5),
+        (date(2026, 3, 20), False, "open_meteo_archive", "precipitation_sum", 2.5, 2.75),
+    ):
+        con.execute("INSERT INTO baseline_refreshes VALUES (?, ?, ?, ?, ?, ?)", list(row))
+
+    con.execute(QUARANTINE_DDL)
+    for obs_id, day, source, check, value, opened_at in (
+        # 03:00 UTC on 3 Jan is 22:00 on 2 Jan in New York.
+        ("blue_spring_counts_daily:2026-01-02", date(2026, 1, 2), "blue_spring_counts",
+         "count_range", "2400", utc(2026, 1, 3, 3, 0)),
+        ("weather_daily:2026-01-02", date(2026, 1, 2), "open_meteo_archive",
+         "beyond_normal", "-3.5", utc(2026, 1, 3, 14, 0)),
+        ("blue_spring_counts_daily:2026-01-04", date(2026, 1, 4), "blue_spring_counts",
+         "count_jump", "310", utc(2026, 1, 4, 14, 0)),
+    ):
+        con.execute("INSERT INTO quarantine VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                    [obs_id, source, obs_id.split(":")[0], obs_id.split(":")[1], day, check,
+                     value, opened_at.replace(tzinfo=None)])
+    clearing.decide(con, "blue_spring_counts_daily:2026-01-02", "rejected",
+                    "SECRET REASON: typo", now=utc(2026, 1, 5, 16, 0))
+    clearing.decide(con, "weather_daily:2026-01-02", "confirmed",
+                    "SECRET REASON: cold front", now=utc(2026, 1, 3, 20, 0))
+    return con
+
+
+def test_baseline_drift_values(quality, tmp_path):
+    out = tmp_path / "out"
+    dashboard.export(quality, out, git_sha="abc1234", now=NOW)
+    assert (out / "baseline_drift.csv").read_text(encoding="utf-8").splitlines()[1:] == [
+        "2024-04-01,true,open_meteo_archive,temperature_2m_min,,10,,0",
+        "2025-04-01,true,open_meteo_archive,precipitation_sum,,2.5,,0",
+        "2025-04-01,true,open_meteo_archive,temperature_2m_min,10,10.25,0.25,0.25",
+        "2026-03-20,false,open_meteo_archive,precipitation_sum,2.5,2.75,0.25,0.25",
+        "2026-03-20,false,open_meteo_archive,temperature_2m_min,10.25,10.1,-0.15,0.1",
+    ]
+
+
+def test_quarantine_queue_values(quality, tmp_path):
+    out = tmp_path / "out"
+    dashboard.export(quality, out, git_sha="abc1234", now=NOW)  # run date 6 Jan in New York
+    text = (out / "quarantine_queue.csv").read_text(encoding="utf-8")
+    assert text.splitlines()[1:] == [
+        "2026-01-02,blue_spring_counts,count_range,2400,rejected,2026-01-02,2026-01-05,3",
+        "2026-01-02,open_meteo_archive,beyond_normal,-3.5,confirmed,2026-01-03,2026-01-03,0",
+        "2026-01-04,blue_spring_counts,count_jump,310,open,2026-01-04,,2",
+    ]
+    assert "SECRET" not in text
+
+
+def test_quarantine_queue_open_items_age_with_the_run_date(quality):
+    rows = dashboard.quarantine_queue(quality, date(2026, 1, 14))
+    assert [(r[4], r[7]) for r in rows] == [("rejected", 3), ("confirmed", 0), ("open", 10)]
+
+
+def test_quarantine_queue_without_decisions_table(tmp_path):
+    c = duckdb.connect(str(tmp_path / "q.duckdb"))
+    c.execute(QUARANTINE_DDL)
+    c.execute("INSERT INTO quarantine (obs_id, source, observation_date, check_name, value, opened_at) "
+              "VALUES ('x:1', 's', DATE '2026-01-02', 'c', '1', TIMESTAMP '2026-01-02 15:00:00')")
+    assert dashboard.quarantine_queue(c, date(2026, 1, 5)) == [
+        (date(2026, 1, 2), "s", "c", "1", "open", "2026-01-02", "", 3)]
+    c.close()
+
+
+def test_quality_exports_are_deterministic(quality, tmp_path):
+    first, second = tmp_path / "first", tmp_path / "second"
+    dashboard.export(quality, first, git_sha="abc1234", now=NOW)
+    dashboard.export(quality, second, git_sha="abc1234", now=NOW)
+    for name in ("baseline_drift.csv", "quarantine_queue.csv"):
+        assert (first / name).read_bytes() == (second / name).read_bytes()
+    assert dashboard.export(quality, first, git_sha="abc1234", now=NOW) == []

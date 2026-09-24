@@ -19,7 +19,7 @@ import csv
 import io
 import logging
 import subprocess
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
@@ -27,6 +27,7 @@ from zoneinfo import ZoneInfo
 import duckdb
 
 from roll_call import config
+from roll_call.quality.clearing import QUARANTINE_TABLE
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +62,13 @@ def _local_date(ts: datetime) -> str:
     """The America/New_York date of a stored UTC timestamp, as YYYY-MM-DD."""
     aware = ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
     return aware.astimezone(ZoneInfo(config.TIMEZONE)).date().isoformat()
+
+
+def _run_date(now: datetime | None) -> date:
+    """The America/New_York date of the run, from now (UTC) or the clock."""
+    now = now or datetime.now(timezone.utc)
+    aware = now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now
+    return aware.astimezone(ZoneInfo(config.TIMEZONE)).date()
 
 
 def _cell(value: Any) -> str:
@@ -125,27 +133,63 @@ def source_status(con: duckdb.DuckDBPyConnection) -> list[Row]:
 def baseline_drift(con: duckdb.DuckDBPyConnection) -> list[Row]:
     """Cumulative signed change in each baseline across refreshes, replayed years included.
 
-    TODO(owner): stage 2. Read `config.TABLES.baseline_refreshes`, the refresh log that keeps
-    each baseline's old and new value side by side, with a flag for replayed refreshes. One row
-    per refresh per source per measure: change = new_value - old_value, and cumulative_change is
-    the running sum of change per (source, measure) ordered by refreshed_on. Sort by
-    (refreshed_on, source, measure). Until that table exists, the file is header-only.
+    One row per refresh per source per measure, from the refresh log. change is new_value -
+    old_value, blank for a measure's first refresh, which has no old value. cumulative_change
+    is the running sum of change per (source, measure) in refreshed_on order, starting at 0.
+    Sorted by (refreshed_on, source, measure). Header-only until the log exists.
     """
-    return []
+    table = config.TABLES.baseline_refreshes
+    if not _table_exists(con, table):
+        return []
+    rows = con.execute(
+        f"""
+        SELECT refreshed_on, replayed, source, measure, old_value, new_value,
+               new_value - old_value AS change,
+               coalesce(sum(new_value - old_value) OVER (
+                   PARTITION BY source, measure ORDER BY refreshed_on
+                   ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), 0.0) AS cumulative_change
+        FROM {table}
+        ORDER BY refreshed_on, source, measure
+        """
+    ).fetchall()
+    return [tuple(r) for r in rows]
 
 
-def quarantine_queue(con: duckdb.DuckDBPyConnection) -> list[Row]:
+def quarantine_queue(con: duckdb.DuckDBPyConnection, today: date | None = None) -> list[Row]:
     """Quarantined observations and how long each took to clear.
 
-    TODO(owner): stage 2. Read the quarantine table (not created yet; add its name to
-    `config.Tables` when it is), one row per quarantined observation with the check that doubted
-    it and the day it opened. Join `config.TABLES.clearing_decisions` for status (confirmed or
-    rejected; open when no decision exists) and cleared_on. days_open runs from opened_on to
-    cleared_on, or to the run date while still open. Never export the clearing reason: it is
-    free text. Sort by (opened_on, source, check_name, observation_date). Until then, the file
-    is header-only.
+    One row per quarantined observation, with the check that doubted it. status is the clearing
+    decision (confirmed or rejected), or open when there is none. opened_on and cleared_on are
+    America/New_York dates of the stored UTC times. days_open runs from opened_on to cleared_on,
+    or to today (the run date) while still open. The clearing reason is free text and is never
+    exported. Sorted by (opened_on, source, check_name, observation_date).
+    Header-only until the quarantine table exists.
     """
-    return []
+    if not _table_exists(con, QUARANTINE_TABLE):
+        return []
+    today = today or _run_date(None)
+    decisions = config.TABLES.clearing_decisions
+    if _table_exists(con, decisions):
+        join = f"LEFT JOIN {decisions} d ON d.obs_id = q.obs_id"
+        decided = "d.decision, d.decided_at"
+    else:
+        join, decided = "", "NULL, NULL"
+    found = con.execute(
+        f"SELECT q.obs_id, q.observation_date, q.source, q.check_name, q.value, q.opened_at, "
+        f"{decided} FROM {QUARANTINE_TABLE} q {join}"
+    ).fetchall()
+
+    rows = []
+    for obs_id, observation_date, source, check_name, value, opened_at, decision, decided_at in found:
+        opened_on = _local_date(opened_at) if opened_at else ""
+        cleared_on = _local_date(decided_at) if decision and decided_at else ""
+        end = cleared_on or today.isoformat()
+        days_open = (date.fromisoformat(end) - date.fromisoformat(opened_on)).days if opened_on else None
+        row = (observation_date, source, check_name, value, decision or "open",
+               opened_on, cleared_on, days_open)
+        rows.append(((opened_on, source or "", check_name or "", str(observation_date or ""),
+                      obs_id), row))
+    return [row for _, row in sorted(rows)]
 
 
 def meta(git_sha: str, now: datetime | None = None) -> list[Row]:
@@ -208,7 +252,7 @@ def export(con: duckdb.DuckDBPyConnection, out_dir: Path | None = None,
     summaries = {
         "source_status": source_status(con),
         "baseline_drift": baseline_drift(con),
-        "quarantine_queue": quarantine_queue(con),
+        "quarantine_queue": quarantine_queue(con, _run_date(now)),
     }
     changed = []
     for name, rows in summaries.items():
