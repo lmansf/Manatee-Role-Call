@@ -202,7 +202,7 @@ modules, until it is calibrated from the extracted historical seasons (§8).
   scheduled refresh turns into a rolling window unnoticed.
 - A replayed refresh applies the live rule to a past year, using only data from before that
   year's refresh date, and is labelled as replayed. The drift history then starts where the
-  data does. `replay` in `roll_call/quality/baselines.py` runs them. No scheduled job calls it.
+  data does. `jobs/replay_baselines.py` runs them once, after the weather backfill.
 
 ### Quarantine, incidents and clearing
 

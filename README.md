@@ -49,6 +49,7 @@ jobs/
   publish_dashboard.py the daily run's last step: export, commit and push the dashboard CSVs
   backup_db.py         weekly: export human records to CSV, copy the database to a second disk
   backfill_weather.py  one-off: weather history for training and baselines
+  replay_baselines.py  one-off: replayed baseline refreshes for past seasons, after the backfill
 notebooks/
   clearing.ipynb       where the owner clears quarantined observations
 data/

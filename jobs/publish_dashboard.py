@@ -12,7 +12,8 @@ leaves the runner clone dirty.
 
 The timer runs from a dedicated clean "runner" clone. The job refuses to publish from any branch
 but PUBLISH_BRANCH, or while files outside the two folders have uncommitted changes. Git's own
-configured credentials (an SSH deploy key) do the pushing; this code never handles them.
+configured credentials (a fine-grained access token in its credential store, see
+docs/scheduling.md) do the pushing; this code never handles them.
 
 Steps: check the branch, check the tree is clean, `git pull --ff-only`, export, stage the two
 folders, commit if anything is staged, push. Any failure exits non-zero.
