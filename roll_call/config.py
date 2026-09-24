@@ -41,6 +41,11 @@ COUNT_PLAUSIBLE_RANGE = (0, 1500)
 DB_PATH = (REPO_ROOT / os.environ.get("ROLL_CALL_DB", "data/roll_call.duckdb")).resolve()
 RECORDS_DIR = REPO_ROOT / "data" / "records"
 
+# The dashboard's data: small summary CSVs committed to the repo and pushed each run. Vercel
+# rebuilds the Evidence site in dashboard/ on every push. Publishing refuses any other branch.
+DASHBOARD_DATA_DIR = REPO_ROOT / "dashboard" / "sources" / "roll_call"
+PUBLISH_BRANCH = os.environ.get("PUBLISH_BRANCH") or "main"
+
 
 def env(name: str, required: bool = True) -> str | None:
     """Read a setting from the environment (.env already loaded). Fails loudly when a
