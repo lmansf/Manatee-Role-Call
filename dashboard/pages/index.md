@@ -134,7 +134,7 @@ A dash means the pipeline does not compute that value yet, or the run failed bef
 
 ## Recent runs
 
-The last 14 run dates. A failed run leaves the last success unchanged.
+This table covers the last 14 run dates. A failed run leaves the last success unchanged.
 
 <DataTable data={recent_runs} rows=15>
     <Column id=run_date title="Run date" fmt="yyyy-mm-dd"/>

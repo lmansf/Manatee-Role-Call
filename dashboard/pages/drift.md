@@ -41,7 +41,7 @@ where not is_replayed
 
 A baseline is the fixed reference a check compares against. Each baseline is replaced once a year when the season closes, and every refresh logs the old and new values side by side. Each chart adds up the signed changes, so a line that keeps climbing or falling shows a baseline drifting in one direction.
 
-Replayed refreshes are computed after the fact for past years with the same rule as live ones. They give the history its years before the pipeline existed. On each chart a shaded band covers the replayed refreshes and every live refresh carries a label. The table marks each refresh as replayed or live.
+A replayed refresh applies the live rule to a past year, after the fact. Replayed refreshes give the history its years before the pipeline existed. On each chart a shaded band covers the replayed refreshes and every live refresh carries a label. The table marks each refresh as replayed or live.
 
 {#if drift.length === 0}
 

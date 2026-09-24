@@ -3,7 +3,7 @@
 Source responses the parsers are tested against. Tests never touch the network.
 
 Every fixture here is currently synthetic. No source was reachable from the environment that
-wrote the parsers, so each file was built from the documented response shape and real report
+wrote the parsers, so each file follows the documented response shape and uses real report
 sentences (docs/sources.md). Replace each one with a saved real response, using the smoke tests
 in docs/sources.md section 5, and keep the tests passing.
 

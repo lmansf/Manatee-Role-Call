@@ -3,13 +3,17 @@
 A static site that shows what Roll Call's data-quality layer saw. It is built with
 [Evidence](https://github.com/evidence-dev/evidence) and hosted on Vercel.
 
+The site uses Evidence 40, the legacy static-site line of Evidence. The current Evidence
+product, Evidence Studio, needs a live warehouse connection, and this site is built from CSV
+files in the repo.
+
 ## Pages
 
-- **Source status** (`pages/index.md`): when the data was last exported, a warning when that
-  export is more than two days old, and the latest status of each source with recent history.
-- **Baseline drift** (`pages/drift.md`): the cumulative signed change in each baseline across
-  refreshes. A shaded band marks replayed refreshes, and each live refresh has a label.
-- **Quarantine queue** (`pages/quarantine.md`): open quarantined observations and how long
+- Source status (`pages/index.md`) shows when the data was last exported, warns when that
+  export is more than two days old, and gives each source's latest status with recent history.
+- Baseline drift (`pages/drift.md`) charts the cumulative signed change in each baseline
+  across refreshes. A shaded band marks replayed refreshes, and each live refresh has a label.
+- Quarantine queue (`pages/quarantine.md`) lists open quarantined observations and how long
   cleared ones stayed open.
 
 Every page shows a plain message when its tables are empty.
@@ -17,7 +21,7 @@ Every page shows a plain message when its tables are empty.
 ## Where the data comes from
 
 After each daily run the pipeline writes four summary CSV files into `sources/roll_call/` and
-pushes them to GitHub. Vercel rebuilds the site on every push.
+pushes them to GitHub. Vercel rebuilds the site on each push that changes `dashboard/`.
 
 | File | One row per |
 |---|---|
@@ -31,14 +35,15 @@ The committed files hold only their header rows. Real rows arrive with the first
 Each CSV has a matching `.sql` file that reads it with fixed column types. Evidence writes no
 data file for a table with zero rows, and the build then fails. Each query therefore adds one
 placeholder row, and every page removes it with `where not is_placeholder`. Dates stay as text
-in these queries and are cast on the pages.
+in these queries and the pages cast them.
 
-The freshness warning is computed in the visitor's browser from `generated_at_utc`. It keeps
-working when the pipeline machine is off and no new build happens.
+The visitor's browser computes the freshness warning from `generated_at_utc`. The warning
+keeps working when the pipeline machine is off and no new build happens.
 
 ## Run it locally
 
-Needs Node 22 and internet access (DuckDB downloads its Parquet extension during the build).
+You need Node 22 and internet access. At build time, locally and on Vercel, DuckDB downloads
+its Parquet extension from extensions.duckdb.org.
 
 ```bash
 cd dashboard
@@ -52,7 +57,8 @@ Run `npm run sources` again after the CSV files change.
 
 ## Vercel project settings
 
-`vercel.json` holds the build settings, so only the root directory is set in the dashboard.
+`vercel.json` holds the build settings, so the only setting made in Vercel's project settings
+is the root directory.
 
 | Setting | Value |
 |---|---|
@@ -61,11 +67,10 @@ Run `npm run sources` again after the CSV files change.
 | Install Command | `npm ci` |
 | Build Command | `npm run sources:strict && npm run build` |
 | Output Directory | `build` |
+| Ignored Build Step | `git diff --quiet HEAD^ HEAD -- .` |
 | Node.js Version | 22.x (from `engines` in `package.json`) |
 | Environment variables | none |
 
-The strict sources step stops the build when a CSV cannot be read. Vercel then keeps the last
-good deployment online.
-
-Evidence 40 is the static-site version of Evidence. Its current product, Evidence Studio, needs
-a live database connection, so it does not fit a site built from CSV files.
+The ignored build step skips a build when the pushed commit changed nothing under
+`dashboard/`. The strict sources step stops the build when a CSV cannot be read. Vercel then
+keeps the last good deployment online.

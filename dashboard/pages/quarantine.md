@@ -46,7 +46,7 @@ select
 from ${queue}
 ```
 
-A check that doubts a single observation quarantines it. The observation is kept but held out of training until a person clears it, either as confirmed real or as rejected. Time to clear shows whether that loop closes.
+A check that doubts a single observation quarantines it. The pipeline keeps the observation but holds it out of training until a person clears it, either as confirmed real or as rejected. Time to clear shows whether that loop closes.
 
 {#if queue.length === 0}
 

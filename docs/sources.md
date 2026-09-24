@@ -18,7 +18,7 @@ Response shape is the same on every endpoint. Top-level keys:
 timezone_abbreviation, daily_units, daily, hourly_units, hourly`. Each of `daily` and
 `hourly` is column-oriented: a `time` array plus one array per variable, positionally
 aligned. Missing values are `null`. Persist `daily_units` and `hourly_units` with the raw
-payload (spec §3.1).
+payload (spec §3.2).
 
 Defaults to override on every call: `timezone` defaults to GMT; `cell_selection` defaults
 to `land` (fine for Blue Spring); `models` defaults to `best_match`.
@@ -35,8 +35,8 @@ GET https://archive-api.open-meteo.com/v1/archive
   &temperature_unit=celsius&precipitation_unit=mm&wind_speed_unit=kmh
 ```
 
-- Data: ERA5 (0.25°, from 1940) and ERA5-Land (0.1°, from 1950), blended under
-  `best_match`. Updated daily with a **5-day delay**. Days inside the lag come back as
+- The data is ERA5 (0.25°, from 1940) and ERA5-Land (0.1°, from 1950), blended under
+  `best_match`. It updates daily with a 5-day delay. Days inside the lag come back as
   `null`, not as missing rows.
 - All six daily fields and hourly `temperature_2m` are confirmed present in the archive
   endpoint's variable list (the website source, `historical-weather-api/options.ts`).
@@ -87,7 +87,7 @@ GET https://previous-runs-api.open-meteo.com/v1/forecast
 
 `https://historical-forecast-api.open-meteo.com/v1/forecast`, archived model output
 stitched from the first hours of each run, from 2021/2022. Better day-to-day accuracy
-than ERA5 but a shorter history. Spec §3.1 picked the archive for observations; this is
+than ERA5 but a shorter history. Spec §3.2 picked the archive for observations; this is
 the alternative if ERA5's coarse grid turns out to matter for a spring in a river valley.
 
 ## 2. Save the Manatee Club: Blue Spring sighting reports
@@ -111,33 +111,33 @@ fall back to the page itself.
 
 ### Where the reports live
 
-Hub page: `https://savethemanatee.org/bssp-manatee-reports/` ("Manatee Sighting Blog").
+The hub page is `https://savethemanatee.org/bssp-manatee-reports/` ("Manatee Sighting Blog").
 An older path, `/manatees/manatee-webcams/manatee-reports/`, still appears in search;
 treat it as a redirect, not a second source.
 
-The reports are **not one post per day**. Each finished season is archived as one long
+The reports are not one post per day. Each finished season is archived as one long
 page, and the slug has changed over the years:
 
 | Season | URL |
 |---|---|
-| 2018–19 | `/?p=4458` |
-| 2019–20 | `/manatee-sighting-reports-2019-2020/` |
-| 2020–21 | `/manatee-sighting-reports-2020-2021/` |
-| 2021–22 | `/manatee-sighting-reports-2021-2022/` (an older `/manatee-reports-2021-2022/` also exists) |
-| 2022–23 | `/bssp-report-2022-2023/` |
-| 2023–24 | `/manatee-sighting-reports-2023-2024/` |
-| 2024–25 | `/manatee-sighting-reports-2024-2025/` |
-| 2025–26 | no archive page found as of 2026-09-23; the current season appears to live on the hub itself |
+| 2018-19 | `/?p=4458` |
+| 2019-20 | `/manatee-sighting-reports-2019-2020/` |
+| 2020-21 | `/manatee-sighting-reports-2020-2021/` |
+| 2021-22 | `/manatee-sighting-reports-2021-2022/` (an older `/manatee-reports-2021-2022/` also exists) |
+| 2022-23 | `/bssp-report-2022-2023/` |
+| 2023-24 | `/manatee-sighting-reports-2023-2024/` |
+| 2024-25 | `/manatee-sighting-reports-2024-2025/` |
+| 2025-26 | no archive page found as of 2026-09-23; the current season appears to live on the hub itself |
 
-No season page before 2018–19 turned up in search.
+No season page before 2018-19 turned up in search.
 
 Separately, "Manatee Sightings Update: <Month> <Year>" posts appear every couple of months,
 in every year back to at least 2021. They are adoptee narratives, not daily roll calls, and
 off-season ones (April, June, August) carry no count at all. They are not a count source.
 
-Consequences for the scraper: discover season pages from the hub rather than hard-coding
-slugs, and expect the hub to hold whichever season is current. **Time-sensitive:** if
-2025–26 really lives only on the hub, it will be replaced when the 2026–27 season starts
+For the scraper, this means discovering season pages from the hub rather than hard-coding
+slugs, and expecting the hub to hold whichever season is current. This is time-sensitive. If
+2025-26 really lives only on the hub, it will be replaced when the 2026-27 season starts
 around 1 November. Cache that page before then. A
 `Protected: Manatee Sighting Update: December 2025` page also exists (WordPress password
 protection), so a URL matching the pattern can still have no readable body.
@@ -147,8 +147,8 @@ protection), so a URL matching the pattern can still have no readable body.
 
 ### How entries are written
 
-Prose, one paragraph or a few per day, dated. Phrasing collected from search snippets
-of the 2023–24 and 2024–25 pages. Quote these in the parser tests as the fixture
+Entries are dated prose, one paragraph or a few per day. The phrasing below comes from search
+snippets of the 2023-24 and 2024-25 pages. Quote these in the parser tests as the fixture
 sentences until real fixtures are saved:
 
 - "The river temp was 70.3°F (21.3°C) with 51 manatees for roll call."
@@ -175,15 +175,15 @@ Parser consequences:
    figure and derive °C; use the parenthesised °C only as a cross-check.
 4. "River temp", "river temperature" and "the river" are all used. Air temperature
    appears sometimes. Spring temperature rarely, because it is constant.
-5. Dates: the format inside a page is not confirmed from snippets. Expect a heading or a
+5. The date format inside a page is not confirmed from snippets. Expect a heading or a
    bold lead-in per day. This is the first thing to look at in a saved fixture.
 
 ### The park's own page is not a source
 
 Park staff post a morning count to Blue Spring's page on floridastateparks.org and to social
-media under `#manateecount`. Checked by the owner: the page is blog-style prose with several
+media under `#manateecount`. The owner checked the page. It is blog-style prose with several
 numbers per post, no cleaner than the reports, and the park count already appears in most
-reports. Not ingested.
+reports. The pipeline does not ingest it.
 
 ### Politeness
 
@@ -216,14 +216,14 @@ GET https://api.waterdata.usgs.gov/ogcapi/v0/collections/continuous/items
   &f=json
 ```
 
-- Parameter names confirmed from USGS's own Python client (`dataretrieval`,
-  `waterdata.get_daily`). Responses are GeoJSON feature collections; each feature's
+- USGS's own Python client (`dataretrieval`, `waterdata.get_daily`) confirms the parameter
+  names. Responses are GeoJSON feature collections; each feature's
   `properties` carries `time`, `value`, `unit_of_measure` and `approval_status`.
-- Works without a key at a lower rate limit. A free key is sent as the `X-Api-Key`
+- The API works without a key at a lower rate limit. A free key is sent as the `X-Api-Key`
   header; put it in `.env` as `API_USGS_PAT` if limits bite.
-- `approval_status` is **Provisional** for recent values and **Approved** once USGS has
+- `approval_status` is Provisional for recent values and Approved once USGS has
   reviewed them, sometimes with changed values. Store each value with its status and
-  keep revisions rather than overwriting: like forecast revisions, it is real drift.
+  keep revisions rather than overwriting. Like forecast revisions, a revision is real drift.
 - **verify** how far back the gauge's temperature record goes (discharge goes back decades;
   temperature may be shorter), and whether `time` accepts `P7D` as shown or needs an
   explicit interval.
@@ -234,10 +234,11 @@ GET https://api.waterdata.usgs.gov/ogcapi/v0/collections/continuous/items
 
 ## 4. FWC synoptic surveys (out of the first version)
 
-Not ingested in the first version (spec §3.5). Kept here for later.
+The first version does not ingest these surveys (spec §3.5). This section keeps the calls for
+later.
 
-ArcGIS REST, no key. Aerial statewide counts, 1991 to present, one to three flights per
-winter.
+The service is ArcGIS REST and needs no key. It holds aerial statewide counts from 1991 to
+the present, one to three flights per winter.
 
 ```
 GET https://gis.myfwc.com/mapping/rest/services/Open_Data/Manatee_Synoptic_Survey_Observation_Locations/MapServer/layers?f=pjson
@@ -249,7 +250,7 @@ GET https://gis.myfwc.com/mapping/rest/services/Open_Data/Manatee_Synoptic_Surve
   many layers, likely one per survey. **verify** the layout before writing a loader.
 - Add `returnCountOnly=true` to size a layer before paging. Page with `resultOffset`;
   with no `orderByFields` the service orders by object ID, which is stable.
-- Bulk download alternative: the dataset page on `geodata.myfwc.com`
+- For a bulk download, the dataset page on `geodata.myfwc.com`
   (`/datasets/myfwc::manatee-synoptic-survey-observation-locations/about`) offers CSV
   and GeoJSON. For a handful of rows per year, one CSV download per season is simpler
   than paging the REST service.
