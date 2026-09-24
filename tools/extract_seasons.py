@@ -15,8 +15,8 @@ The extraction is conservative on purpose. It records every candidate count with
 attributed to, and sets needs_review with a reason whenever the prose is ambiguous, rather than
 guessing. Aggregation (which count to trust, what to do with estimates) is left to you.
 
-This is not the pipeline's parser. roll_call/ingest/blue_spring.parse_report is separate and
-still yours to write; the review reasons this tool emits are the cases that parser must handle.
+The extraction itself lives in roll_call/ingest/blue_spring.py, shared with the daily pipeline.
+This tool only fetches season pages, formats one CSV row per entry, and flags repeated dates.
 """
 from __future__ import annotations
 
@@ -26,15 +26,24 @@ import re
 import sys
 import time
 from collections import Counter
-from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
 from urllib import robotparser
 
 import requests
-from bs4 import BeautifulSoup
 
 ROOT = Path(__file__).resolve().parents[1]
+# Run as a script, this folder is on sys.path but the repo root may not be. Put it first so
+# the tool always reads pages with this checkout's parser.
+sys.path.insert(0, str(ROOT))
+
+from roll_call.ingest.blue_spring import (  # noqa: E402
+    Candidate,
+    Entry,
+    extract_entry,
+    page_entries,
+    parse_date_lead,  # noqa: F401  (re-exported for callers and tests)
+)
+
 RAW_DIR = ROOT / "data" / "raw" / "stmc"
 OUT_DIR = ROOT / "data" / "seasons"
 REFERENCE = ROOT / "data" / "reference" / "blue_spring_manatee_counts_2025_2026.csv"
@@ -62,212 +71,11 @@ COLUMNS = [
     "source_url", "entry_text",
 ]
 
-# ---------------------------------------------------------------- page -> text blocks
-
-CONTENT_SELECTORS = [".entry-content", "article", "main", "#content"]
-BLOCK_TAGS = ["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote"]
-STRIP_TAGS = ["script", "style", "noscript", "nav", "footer", "header", "form", "aside"]
-
-
-def normalise(text: str) -> str:
-    text = text.replace("\xa0", " ").replace("º", "°").replace("˚", "°")
-    text = text.replace("’", "'").replace("–", "-").replace("—", " - ")
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def page_season(html: str) -> str | None:
-    """Season named in the page title or first heading, e.g. '2023 – 2024' -> '2023-2024'."""
-    soup = BeautifulSoup(html, "html.parser")
-    for el in (soup.title, soup.find("h1")):
-        if el:
-            m = re.search(r"(20\d\d)\s*[–-]\s*(20\d\d)", el.get_text())
-            if m:
-                return f"{m.group(1)}-{m.group(2)}"
-    return None
-
-
-def content_blocks(html: str) -> list[str]:
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup(STRIP_TAGS):
-        tag.decompose()
-    root = next((el for sel in CONTENT_SELECTORS if (el := soup.select_one(sel))), soup.body or soup)
-    blocks = [el.get_text(" ", strip=True) for el in root.find_all(BLOCK_TAGS) if not el.find_parent(BLOCK_TAGS)]
-    total = len(root.get_text(" ", strip=True))
-    if total and sum(len(b) for b in blocks) < 0.5 * total:
-        # Text not wrapped in block tags (bare <br>-separated divs): fall back to lines.
-        blocks = root.get_text("\n").splitlines()
-    return [n for b in blocks if (n := normalise(b))]
-
-
-# ---------------------------------------------------------------- blocks -> dated entries
-
-MONTHS = {m: i for i, m in enumerate(
-    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
-DATE_LEAD = re.compile(
-    r"^(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day,?\s+)?"
-    r"(?P<mon>jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+"
-    r"(?P<day>\d{1,2})(?:st|nd|rd|th)?(?!\d)"
-    r"(?:,?\s+(?P<year>20\d\d))?",
-    re.I,
-)
-NUMERIC_DATE_LEAD = re.compile(r"^(?P<mon>\d{1,2})/(?P<day>\d{1,2})(?:/(?P<year>\d{2}|\d{4}))?(?!\d)")
-
-
-@dataclass
-class Entry:
-    date: date
-    text: str
-    reasons: list[str] = field(default_factory=list)
-
-
-def parse_date_lead(season: str, block: str) -> tuple[date, str, list[str]] | None:
-    m = DATE_LEAD.match(block) or NUMERIC_DATE_LEAD.match(block)
-    if not m:
-        return None
-    mon = m.group("mon")
-    month = int(mon) if mon.isdigit() else MONTHS[mon[:3].lower()]
-    start, end = (int(y) for y in season.split("-"))
-    inferred = start if month >= 7 else end
-    year, reasons = inferred, []
-    if m.group("year"):
-        year = int(m.group("year"))
-        year += 2000 if year < 100 else 0
-        if year != inferred:
-            reasons.append(f"stated year {year} disagrees with season")
-    try:
-        d = date(year, month, int(m.group("day")))
-    except ValueError:
-        return None
-    rest = block[m.end():].lstrip(" :-.,")
-    return d, rest, reasons
-
-
-def split_entries(season: str, blocks: list[str]) -> list[Entry]:
-    entries: list[Entry] = []
-    for b in blocks:
-        parsed = parse_date_lead(season, b)
-        if parsed:
-            entries.append(Entry(*parsed))
-        elif entries:
-            entries[-1].text = f"{entries[-1].text} {b}".strip()
-    return entries
-
-
-# ---------------------------------------------------------------- entry text -> values
-
-NUM = r"(\d{1,3}(?:,\d{3})+|\d{1,4})(?!\d|[.,]\d)"
-NOT_A_COUNT = r"(?!\s*(?:°|degrees|F\b|C\b|%|a\.m|p\.m|am\b|pm\b))"
-MANATEE_COUNT = re.compile(
-    NUM + r"\s+(?:(?P<qual>additional|new|more|other|different|extra)\s+)?manatees?\b", re.I)
-COUNT_VERB = re.compile(
-    r"\bcount(?:ed|ing|s)?\b(?:\s+(?:was|were|is|of|went|up|down|to|dropped|rose|jumped|fell|"
-    r"increased|decreased|climbed|reached|totaled|totalled|now|today|this|morning)){0,4}\s+"
-    + NUM + NOT_A_COUNT, re.I)
-ESTIMATE_COUNT = re.compile(
-    r"\bestimat(?:e|ed|es)\b(?:\s+(?:was|were|is|of|at|to|be)){0,2}\s+" + NUM + NOT_A_COUNT, re.I)
-BY_WHO = re.compile(NUM + r"\s+by\s+(?:the\s+)?(?:park|rangers?|staff|researchers?|us|smc)\b", re.I)
-AFTER_BY = re.compile(
-    r"\s*(?:\w+\s+)?(?:manatees?\s+)?(?:were\s+|was\s+)?(?:counted\s+)?by\s+(?:the\s+)?([a-z]+)", re.I)
-PARK = re.compile(r"\b(?:park|rangers?|staff)\b", re.I)
-SMC = re.compile(r"\b(?:researchers?|research|we|our|us|smc|wayne|cora)\b", re.I)
-CLAUSE_BREAK = re.compile(r"[,;]|(?<!\d)\.(?!\d)|\b(?:while|but|whereas|though|although)\b", re.I)
-ESTIMATE_BEFORE = re.compile(
-    r"(?:about|approximately|approx\.?|around|roughly|an estimated|estimated|over|more than|"
-    r"at least|nearly|almost|~)\s*$", re.I)
-ESTIMATE_ANY = re.compile(r"\bestimat|\bundercount|\blow count\b", re.I)
-DERIVED = re.compile(r"\+\s*\d+\s+others?\b|\band\s+\d+\s+others\b", re.I)
-NO_COUNT = re.compile(
-    r"\bno\s+(?:roll\s*call|count)\b|\b(?:could\s*not|couldn't|did\s*not|didn't|unable\s+to|"
-    r"wasn't able to|were not able to)\s+(?:do\s+(?:a|the)\s+)?(?:count|roll\s*call)\b|\bnot\s+counted\b",
-    re.I)
-TEMP_F = r"(\d{2}(?:\.\d+)?)\s*°?\s*F\b"
-SPAN = r"(?:[^.;]|(?<=\d)\.(?=\d)){0,60}?"
-RIVER_TEMP = re.compile(r"\briver\b" + SPAN + TEMP_F, re.I)
-AIR_TEMP = re.compile(r"\bair\s+temp\w*" + SPAN + TEMP_F, re.I)
-
-
-@dataclass
-class Candidate:
-    value: int
-    start: int
-    end: int
-    who: str | None = None  # "smc" | "park" | "ambiguous" | None
-    qual: str | None = None
-    estimate: bool = False
-
-
-def _attribute(text: str, start: int, end: int) -> str | None:
-    m = AFTER_BY.match(text, end)
-    if m and m.start() - end < 40:
-        word = m.group(1)
-        if PARK.search(word):
-            return "park"
-        if SMC.search(word):
-            return "smc"
-    clause = CLAUSE_BREAK.split(text[max(0, start - 60):start])[-1]
-    park, smc = bool(PARK.search(clause)), bool(SMC.search(clause))
-    if park and smc:
-        return "ambiguous"
-    return "park" if park else "smc" if smc else None
-
-
-def find_counts(text: str) -> list[Candidate]:
-    found: dict[int, Candidate] = {}
-    stated_estimates: set[int] = set()
-    for pattern in (MANATEE_COUNT, COUNT_VERB, ESTIMATE_COUNT, BY_WHO):
-        for m in pattern.finditer(text):
-            s, e = m.span(1)
-            c = found.setdefault(s, Candidate(int(m.group(1).replace(",", "")), s, e))
-            if pattern is MANATEE_COUNT and m.group("qual"):
-                c.qual = m.group("qual").lower()
-            if pattern is ESTIMATE_COUNT:
-                stated_estimates.add(s)
-    for c in found.values():
-        c.who = _attribute(text, c.start, c.end)
-        c.estimate = c.start in stated_estimates or bool(ESTIMATE_BEFORE.search(text[max(0, c.start - 20):c.start]))
-    return sorted(found.values(), key=lambda c: c.start)
-
-
-def _first_temp(pattern: re.Pattern, text: str) -> float | None:
-    m = pattern.search(text)
-    return float(m.group(1)) if m else None
-
+# ---------------------------------------------------------------- entry -> CSV row
 
 def extract(entry: Entry, season: str, source_url: str) -> dict:
-    text, reasons = entry.text, list(entry.reasons)
-    cands = find_counts(text)
-    totals = [c for c in cands if not c.qual]
-    additional = [c for c in cands if c.qual]
-    smc = [c for c in totals if c.who == "smc"]
-    park = [c for c in totals if c.who == "park"]
-    unattributed = [c for c in totals if c.who is None]
-    ambiguous = [c for c in totals if c.who == "ambiguous"]
-
-    count_researchers = smc[0] if smc else (unattributed.pop(0) if unattributed else None)
-    count_park = park[0] if park else None
-    others = smc[1:] + park[1:] + unattributed + ambiguous
-
-    no_count = bool(NO_COUNT.search(text))
-    derived = bool(DERIVED.search(text))
-    estimate = any(c.estimate for c in (count_researchers, count_park) if c) or bool(ESTIMATE_ANY.search(text))
-    river = _first_temp(RIVER_TEMP, text)
-    air = _first_temp(AIR_TEMP, text)
-
-    if others:
-        reasons.append("more than one candidate count")
-    if ambiguous:
-        reasons.append("count attribution ambiguous")
-    if derived:
-        reasons.append("count written as a sum (name + N others)")
-    if not count_researchers and not count_park and not no_count:
-        reasons.append("only an 'additional' count" if additional else "no count found")
-    if no_count and (count_researchers or count_park):
-        reasons.append("says no count but has a number")
-    for c in (count_researchers, count_park):
-        if c and c.value > 1500:
-            reasons.append(f"implausible count {c.value}")
-    if river is not None and not 50 <= river <= 80:
-        reasons.append(f"river temp {river} outside 50-80F")
+    """One CSV row for one dated entry. The values come from blue_spring.extract_entry."""
+    x = extract_entry(entry)
 
     def v(c: Candidate | None) -> str:
         return str(c.value) if c else ""
@@ -275,29 +83,24 @@ def extract(entry: Entry, season: str, source_url: str) -> dict:
     return {
         "season": season,
         "date": entry.date.isoformat(),
-        "count_researchers": v(count_researchers),
-        "count_park": v(count_park),
-        "count_other": "|".join(v(c) for c in others),
-        "estimate": str(estimate).upper(),
-        "additional": "|".join(v(c) for c in additional),
-        "derived": str(derived).upper(),
-        "no_count": str(no_count).upper(),
-        "river_temp_f": "" if river is None else f"{river:g}",
-        "air_temp_f": "" if air is None else f"{air:g}",
-        "needs_review": str(bool(reasons)).upper(),
-        "review_reason": "; ".join(reasons),
+        "count_researchers": v(x.count_researchers),
+        "count_park": v(x.count_park),
+        "count_other": "|".join(v(c) for c in x.others),
+        "estimate": str(x.estimate).upper(),
+        "additional": "|".join(v(c) for c in x.additional),
+        "derived": str(x.derived).upper(),
+        "no_count": str(x.no_count).upper(),
+        "river_temp_f": "" if x.river_temp_f is None else f"{x.river_temp_f:g}",
+        "air_temp_f": "" if x.air_temp_f is None else f"{x.air_temp_f:g}",
+        "needs_review": str(bool(x.reasons)).upper(),
+        "review_reason": "; ".join(x.reasons),
         "source_url": source_url,
-        "entry_text": text[:2000],
+        "entry_text": entry.text[:2000],
     }
 
 
 def extract_season(season: str, html: str, source_url: str) -> list[dict]:
-    named = page_season(html)
-    entries = split_entries(season, content_blocks(html))
-    if named and named != season:
-        for e in entries:
-            e.reasons.append(f"page is titled {named}, not {season}")
-    rows = sorted((extract(e, season, source_url) for e in entries), key=lambda r: r["date"])
+    rows = sorted((extract(e, season, source_url) for e in page_entries(html, season)), key=lambda r: r["date"])
     dupes = Counter(r["date"] for r in rows)
     for r in rows:
         if dupes[r["date"]] > 1:
