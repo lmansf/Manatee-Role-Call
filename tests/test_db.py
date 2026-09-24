@@ -217,3 +217,39 @@ def test_repeated_key_in_one_batch_keeps_the_last(con):
     db.write_ingest_result(con, _result("open_meteo_archive", []), T.weather_raw, T.weather_daily,
                            extra={T.weather_hourly: rows})
     assert con.execute(f"SELECT temperature_2m FROM {T.weather_hourly}").fetchall() == [(19.0,)]
+
+
+def test_null_rate_is_stored_on_the_run_and_skips_the_archive_lag(con):
+    from datetime import date
+    from roll_call import config
+    from roll_call.ingest.base import IngestResult
+    from roll_call.ingest.open_meteo import DAILY_FIELDS
+
+    started = datetime(2026, 1, 20, 23, 0, tzinfo=timezone.utc)  # 18:00 in Florida
+    full = {f: 1.0 for f in DAILY_FIELDS}
+    half = {f: (1.0 if i % 2 else None) for i, f in enumerate(DAILY_FIELDS)}
+    lagged = {f: None for f in DAILY_FIELDS}
+    records = [
+        {"obs_date": date(2026, 1, 10), **full, "units": "{}"},
+        {"obs_date": date(2026, 1, 11), **half, "units": "{}"},
+        {"obs_date": date(2026, 1, 18), **lagged, "units": "{}"},  # inside the lag: ignored
+    ]
+    run = IngestRun(source="open_meteo_archive", started_at=started).succeed(len(records))
+    db.write_ingest_result(con, IngestResult(run=run, raw="{}", records=records),
+                           config.TABLES.weather_raw, config.TABLES.weather_daily)
+    stored = con.execute("SELECT null_rate FROM ingest_runs WHERE run_id = ?", [run.run_id]).fetchone()[0]
+    assert stored == pytest.approx(3 / 12)
+
+
+def test_existing_run_log_gains_the_null_rate_column(tmp_path):
+    import duckdb
+    path = tmp_path / "old.duckdb"
+    old = duckdb.connect(str(path))
+    old.execute("CREATE TABLE ingest_runs (run_id VARCHAR PRIMARY KEY, source VARCHAR NOT NULL, "
+                "started_at TIMESTAMP NOT NULL, finished_at TIMESTAMP, status VARCHAR NOT NULL, "
+                "row_count INTEGER, payload_sha256 VARCHAR, source_url VARCHAR, error VARCHAR)")
+    old.close()
+    c = db.connect(path)
+    columns = [r[0] for r in c.execute("DESCRIBE ingest_runs").fetchall()]
+    c.close()
+    assert "null_rate" in columns

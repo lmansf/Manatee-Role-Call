@@ -82,7 +82,7 @@ VOLUME_EXPECTED_ROWS: dict[str, tuple[int | None, int | None]] = {
     GAUGE: (1, None),
 }
 # Null rate: the archive leaves its last ~5 days null by design, so the window ends before them.
-ARCHIVE_LAG_DAYS = 6
+ARCHIVE_LAG_DAYS = config.ARCHIVE_LAG_DAYS
 NULL_RATE_WINDOW_DAYS = 14
 NULL_RATE_MAX = 0.10
 # Weather values further than this many standard deviations from the day's normal.

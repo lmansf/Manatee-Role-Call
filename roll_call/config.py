@@ -37,6 +37,10 @@ SEASON_CLOSE_NOT_BEFORE = (3, 1)
 SEASON_CLOSE_SILENT_WEEKDAYS = 5
 COUNT_PLAUSIBLE_RANGE = (0, 1500)
 
+# Open-Meteo's archive leaves roughly its last five days null while ERA5 catches up
+# (docs/sources.md §1). Null checks and null rates skip this many trailing days.
+ARCHIVE_LAG_DAYS = 6
+
 # Database and backup locations. Relative paths are taken from the repo root.
 DB_PATH = (REPO_ROOT / os.environ.get("ROLL_CALL_DB", "data/roll_call.duckdb")).resolve()
 RECORDS_DIR = REPO_ROOT / "data" / "records"

@@ -229,3 +229,27 @@ def test_quality_exports_are_deterministic(quality, tmp_path):
     for name in ("baseline_drift.csv", "quarantine_queue.csv"):
         assert (first / name).read_bytes() == (second / name).read_bytes()
     assert dashboard.export(quality, first, git_sha="abc1234", now=NOW) == []
+
+
+def test_source_status_reports_null_rate_normal_and_expected_rows(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    from roll_call.ingest.base import IngestRun
+    from roll_call.storage import db as storage
+
+    con = storage.connect(tmp_path / "s.duckdb")
+    t0 = datetime(2026, 1, 5, 23, 0, tzinfo=timezone.utc)
+    for i, rate in enumerate([0.0, 0.2, 0.4]):
+        run = IngestRun(source="open_meteo_forecast", started_at=t0 + timedelta(days=i)).succeed(7)
+        run.null_rate = rate
+        storage.record_run(con, run)
+    storage.record_run(con, IngestRun(source="blue_spring_counts", started_at=t0).succeed(1))
+    rows = {(r[0], r[1]): r for r in dashboard.source_status(con)}
+    con.close()
+    last = rows[("2026-01-07", "open_meteo_forecast")]
+    assert last[5] == 7                      # rows_expected from the volume check
+    assert last[6] == 0.4                    # this run's null rate
+    assert last[7] == pytest.approx(0.1)     # mean of the two earlier runs
+    first = rows[("2026-01-05", "open_meteo_forecast")]
+    assert first[7] is None                  # no earlier runs, no normal yet
+    counts = rows[("2026-01-05", "blue_spring_counts")]
+    assert counts[5] is None                 # counts have no row expectation

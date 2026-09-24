@@ -47,6 +47,9 @@ PIPELINE_PATHS = ("roll_call", "jobs", "pyproject.toml")
 
 Row = tuple[Any, ...]
 
+# How many earlier runs make up a source's normal null rate.
+NULL_RATE_NORMAL_RUNS = 30
+
 
 def _utc_text(ts: datetime | None) -> str:
     """Format a UTC timestamp as ISO 8601 with a Z, to the second. DuckDB hands back naive
@@ -97,25 +100,31 @@ def source_status(con: duckdb.DuckDBPyConnection) -> list[Row]:
     marked `running` never finished, so it counts as failed: the export runs after every source
     has recorded its outcome, and the jobs share a lock, so no other run can be in progress.
 
-    rows_expected, null_rate and null_rate_normal stay blank until the stage 2 checks exist.
-    TODO(owner): fill them from the volume and distribution check results once those tables
-    exist.
+    rows_expected is the least a run should return, from the volume check's expectations;
+    blank for counts, which have none. null_rate is the rate stored on the run when it wrote its
+    rows. null_rate_normal is the mean of that source's previous NULL_RATE_NORMAL_RUNS rates.
     """
+    from roll_call.quality.checks import VOLUME_EXPECTED_ROWS
+
     table = config.TABLES.ingest_runs
     if not _table_exists(con, table):
         return []
     runs = con.execute(
-        f"SELECT source, started_at, status, row_count FROM {table} "
+        f"SELECT source, started_at, status, row_count, null_rate FROM {table} "
         "ORDER BY source, started_at, run_id"
     ).fetchall()
 
     # Runs arrive in time order per source, so each later run of a day replaces the earlier
-    # one, and last_success already covers every run up to it.
+    # one, and last_success and the null-rate history already cover every run before it.
     latest: dict[tuple[str, str], Row] = {}
     last_success: dict[str, datetime] = {}
-    for source, started_at, status, row_count in runs:
+    history: dict[str, list[float]] = {}
+    for source, started_at, status, row_count, null_rate in runs:
         if status == "succeeded":
             last_success[source] = started_at
+        previous = history.setdefault(source, [])[-NULL_RATE_NORMAL_RUNS:]
+        normal = sum(previous) / len(previous) if previous else None
+        expected = VOLUME_EXPECTED_ROWS.get(source, (None, None))[0]
         run_date = _local_date(started_at)
         latest[(run_date, source)] = (
             run_date,
@@ -123,10 +132,12 @@ def source_status(con: duckdb.DuckDBPyConnection) -> list[Row]:
             "succeeded" if status == "succeeded" else "failed",
             _utc_text(last_success.get(source)),
             row_count,
-            None,  # rows_expected
-            None,  # null_rate
-            None,  # null_rate_normal
+            expected,
+            null_rate,
+            normal,
         )
+        if null_rate is not None:
+            history[source].append(null_rate)
     return [latest[key] for key in sorted(latest)]
 
 

@@ -14,15 +14,17 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
 import duckdb
 import pandas as pd
 
 from roll_call import config
 from roll_call.ingest.base import IngestResult, IngestRun
+from roll_call.ingest.open_meteo import DAILY_FIELDS as WEATHER_FIELDS
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +40,8 @@ CREATE TABLE IF NOT EXISTS {T.ingest_runs} (
     row_count      INTEGER,
     payload_sha256 VARCHAR,
     source_url     VARCHAR,
-    error          VARCHAR
+    error          VARCHAR,
+    null_rate      DOUBLE               -- share of nulls in the run's value columns
 )
 """
 
@@ -131,6 +134,8 @@ def connect(path: Path | str | None = None, read_only: bool = False) -> duckdb.D
 def ensure_tables(con: duckdb.DuckDBPyConnection) -> None:
     """Create the run log, the raw tables and the parsed tables if they are missing."""
     con.execute(INGEST_RUNS_DDL)
+    # Databases created before null_rate existed get the column added.
+    con.execute(f"ALTER TABLE {T.ingest_runs} ADD COLUMN IF NOT EXISTS null_rate DOUBLE")
     for ddl in (*RAW_DDL.values(), *PARSED_DDL.values()):
         con.execute(ddl)
 
@@ -143,10 +148,41 @@ def record_run(con: duckdb.DuckDBPyConnection, run: IngestRun) -> None:
     """Insert or update one run. Failed runs are recorded too: the freshness check's first
     question is when a source last succeeded, and failures must leave a trace."""
     con.execute(
-        f"INSERT OR REPLACE INTO {T.ingest_runs} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        f"INSERT OR REPLACE INTO {T.ingest_runs} (run_id, source, started_at, finished_at, "
+        "status, row_count, payload_sha256, source_url, error, null_rate) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [run.run_id, run.source, _utc(run.started_at), _utc(run.finished_at), run.status,
-         run.row_count, run.payload_sha256, run.source_url, run.error],
+         run.row_count, run.payload_sha256, run.source_url, run.error, run.null_rate],
     )
+
+
+# The value columns whose nulls count toward a run's null rate. Counts are left out: a blank
+# count is a day not counted, which is data, not a gap. Hourly rows repeat the daily story.
+NULL_RATE_COLUMNS: dict[str, tuple[str, ...]] = {
+    T.weather_daily: WEATHER_FIELDS,
+    T.weather_forecast: WEATHER_FIELDS,
+    T.gauge_daily: ("water_temp_c",),
+}
+
+
+def run_null_rate(run: IngestRun, parsed_table: str, records: list[dict[str, Any]]) -> float | None:
+    """Share of null values across the table's value columns in this run's records.
+
+    Computed once, when the run writes its rows, and stored on the run. Later runs overwrite
+    overlapping rows, so a rate computed from the table afterwards would keep changing.
+    Archive rows inside the archive's lag are null by design and are left out.
+    """
+    columns = NULL_RATE_COLUMNS.get(parsed_table)
+    if not columns:
+        return None
+    if parsed_table == T.weather_daily:
+        run_day = run.started_at.astimezone(ZoneInfo(config.TIMEZONE)).date()
+        cutoff = run_day - timedelta(days=config.ARCHIVE_LAG_DAYS)
+        records = [r for r in records if r.get("obs_date") is not None and r["obs_date"] <= cutoff]
+    cells = [r.get(c) for r in records for c in columns]
+    if not cells:
+        return None
+    return sum(v is None for v in cells) / len(cells)
 
 
 def last_successful_run(con: duckdb.DuckDBPyConnection, source: str) -> datetime | None:
@@ -298,6 +334,8 @@ def write_ingest_result(con: duckdb.DuckDBPyConnection, result: IngestResult,
         _write_raw(con, result, raw_table)
         for table, records in tables.items():
             _insert_records(con, table, stamp(records, run.run_id))
+        if run.status != "failed":
+            run.null_rate = run_null_rate(run, parsed_table, result.records)
         record_run(con, run)
         con.commit()
     except Exception as exc:

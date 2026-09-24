@@ -29,6 +29,8 @@ class IngestRun:
     row_count: int | None = None
     payload_sha256: str | None = None
     source_url: str | None = None
+    # Share of null values in the run's value columns, set when its rows are written.
+    null_rate: float | None = None
     error: str | None = None
 
     def succeed(self, row_count: int) -> "IngestRun":
