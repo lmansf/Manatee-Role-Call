@@ -422,6 +422,20 @@ def test_join_retention_opens_then_closes_for_the_gauge_and_the_weather(con):
     assert stored(con, "join_retention:gauge") == [(TODAY.isoformat(), TODAY, 1.0)]
 
 
+def test_join_retention_waits_for_enough_dates_before_opening(con):
+    """Early in a season one miss in three dates reads as 67%. The share is stored, but no
+    incident opens until there are JOIN_RETENTION_MIN_DAYS dates to judge."""
+    healthy(con)
+    days = [TODAY - timedelta(days=i) for i in range(checks.ARCHIVE_LAG_DAYS + 1,
+                                                        checks.ARCHIVE_LAG_DAYS + 4)]
+    _joined_days(con, days[:2])
+    _joined_days(con, days[2:], gauge=False, weather=False)
+    assert len(days) < checks.JOIN_RETENTION_MIN_DAYS
+    report = checks.run_checks(con, TODAY)
+    assert not set(RETENTION) & incident_keys(report.new_incidents)
+    assert stored(con, "join_retention:gauge") == [(TODAY.isoformat(), TODAY, pytest.approx(2 / 3))]
+
+
 def test_join_retention_skips_the_archive_lag(con):
     healthy(con)
     old = [TODAY - timedelta(days=i) for i in range(checks.ARCHIVE_LAG_DAYS + 1,

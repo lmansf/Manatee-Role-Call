@@ -185,7 +185,8 @@ dates and measures the share that have a gauge value for the same date and the s
 archive weather for it. Dates still inside the archive's lag are left out of the weather share,
 and today is left out of the gauge share. Both shares are stored in the `measures` table. A
 share below its threshold opens an incident on the counts source, which closes when the share
-recovers.
+recovers. Until enough report dates exist to judge, early in a season, the share is stored but
+opens nothing.
 
 A missing or renamed column opens a schema incident. The null-rate checks catch a column that
 was always populated arriving null, which no query error would show.

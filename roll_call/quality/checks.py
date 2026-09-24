@@ -104,6 +104,9 @@ CROSS_SOURCE_MIN_TRAILING = 5
 # Join retention: the least share of counted report dates that must have a gauge value, and
 # archive weather, for the same date.
 JOIN_RETENTION_MIN_SHARE = 0.9
+# Fewer report dates than this give a share too noisy to judge: one miss in two reads as 50%.
+# The share is still stored; the incident waits until there are enough dates.
+JOIN_RETENTION_MIN_DAYS = 5
 
 
 @dataclass
@@ -501,7 +504,8 @@ def check_join_retention(run: _Run, since: date) -> None:
 
     The weather share leaves out report dates inside the archive's lag, whose weather is null
     by design. The gauge share leaves out today, whose daily mean exists only once the day is
-    over. A share with no report dates to look at leaves its incident as it is."""
+    over. A share over fewer than JOIN_RETENTION_MIN_DAYS report dates is stored but leaves
+    its incident as it is, and so does a share with no report dates at all."""
     con, today = run.con, run.report.today
 
     def join_retention() -> None:
@@ -544,6 +548,8 @@ def check_join_retention(run: _Run, since: date) -> None:
             share = kept / len(days)
             check_name = f"join_retention:{name}"
             store.record_measure(con, check_name, today.isoformat(), today, share)
+            if len(days) < JOIN_RETENTION_MIN_DAYS:
+                continue
             run.settle(COUNTS, check_name, share < JOIN_RETENTION_MIN_SHARE,
                        f"{kept} of {len(days)} counted report dates from {since} to "
                        f"{end - timedelta(days=1)} have {name} data ({share:.0%}), "
