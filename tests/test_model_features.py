@@ -5,6 +5,8 @@ from datetime import date, timedelta
 import pytest
 
 from roll_call.model import features, train
+from roll_call.quality import baselines, clearing, gate
+from roll_call.quality import store as quality_store
 from tests.test_model_support import (  # noqa: F401  fixtures
     add_air, add_count, add_forecast, add_gauge, con, hold_out, season)
 
@@ -111,3 +113,59 @@ def test_training_rows_are_counted_days_without_quarantine(con, season):
     assert tue["days_since_last_count"] == 4 and tue["count"] == 90
     # Training stops at today.
     assert set(train.training_frame(con, today=MON)["target_date"]) == {date(2026, 1, 7), FRI}
+
+
+# The weather gate, with the real quarantine and clearing tables in place of the fake gate.
+
+@pytest.fixture
+def gated(con):
+    quality_store.ensure_tables(con)
+    baselines.ensure_tables(con)
+    return con
+
+
+def _hold_air(con, day, measure):
+    quality_store.quarantine_observation(con, "open_meteo_archive", "weather_daily",
+                                         f"{day.isoformat()}:{measure}", day, "weather_normal",
+                                         -40.0)
+    return gate.weather_obs_id(day, measure)
+
+
+def _targets(con):
+    return set(train.training_frame(con, today=date(2026, 1, 20))["target_date"])
+
+
+ALL_TARGETS = {date(2026, 1, 6), date(2026, 1, 7), date(2026, 1, 8), FRI, TUE}
+
+
+def test_quarantined_air_values_leave_the_training_frame(gated):
+    _week(gated)
+    assert _targets(gated) == ALL_TARGETS
+    _hold_air(gated, date(2026, 1, 8), "temperature_2m_min")  # the target date's low
+    _hold_air(gated, MON, "temperature_2m_mean")  # the prediction day's mean for Tuesday
+    _hold_air(gated, date(2026, 1, 6), "temperature_2m_max")  # a measure no feature reads
+    assert _targets(gated) == ALL_TARGETS - {date(2026, 1, 8), TUE}
+    _, reason = features.compute(features.load_inputs(gated, air="archive"), MON)
+    assert reason == f"air temperature for {MON} is quarantined (temperature_2m_mean)"
+
+
+def test_confirmed_air_value_trains_again_and_rejected_stays_out(gated):
+    _week(gated)
+    confirmed = _hold_air(gated, date(2026, 1, 8), "temperature_2m_min")
+    rejected = _hold_air(gated, MON, "temperature_2m_mean")
+    clearing.decide(gated, confirmed, "confirmed", "A real cold front.")
+    clearing.decide(gated, rejected, "rejected", "Sensor fault.")
+    assert _targets(gated) == ALL_TARGETS - {TUE}
+    frame = train.training_frame(gated, today=date(2026, 1, 20)).set_index("target_date")
+    assert frame.loc[date(2026, 1, 8), "air_min_c"] == pytest.approx(21.0 - 0.5 * 7 - 8)
+
+
+def test_quarantined_archive_value_leaves_the_forecast_alone(gated):
+    _week(gated)
+    _hold_air(gated, MON, "temperature_2m_min")
+    _hold_air(gated, SUN, "temperature_2m_mean")
+    add_forecast(gated, SUN, SUN, low=2.0, mean=7.0)
+    add_forecast(gated, SUN, MON, low=3.0, mean=8.0)
+    row, reason = features.compute(features.load_inputs(gated, air="forecast", made_on=SUN), SUN)
+    assert reason is None
+    assert row.values["air_min_c"] == 3.0

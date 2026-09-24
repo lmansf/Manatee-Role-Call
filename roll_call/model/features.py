@@ -17,6 +17,9 @@ Live predictions read air weather from the forecast. Training reads the archive 
 because the archive is the only record of observed air weather (spec section 3.2). Counts are the
 researchers' only. Not counted and unreported days are skipped, and quarantined observations that
 are open or rejected are left out everywhere, so a doubted count never drives a prediction.
+The same holds for archive air weather: a quarantined weather_daily value that is open or
+rejected reads as missing, so a row that needs it cannot be built. The quality checks do not
+quarantine forecast values, so forecast inputs are used as they are.
 """
 from __future__ import annotations
 
@@ -53,6 +56,8 @@ FORECAST_MAX_AGE_DAYS = 2
 
 AirSource = Literal["archive", "forecast"]
 AirByDay = dict[date, tuple[float | None, float | None]]  # min, mean
+AIR_MIN, AIR_MEAN = "temperature_2m_min", "temperature_2m_mean"  # weather_daily measures
+HeldAir = set[tuple[date, str]]  # (obs_date, measure)
 
 
 def quality_module(name: str) -> ModuleType:
@@ -83,6 +88,7 @@ class Inputs:
     counts: dict[date, tuple[int, bool]] = field(default_factory=dict)  # count, is_estimate
     gauge: dict[date, float] = field(default_factory=dict)  # daily mean, degrees C
     air: AirByDay = field(default_factory=dict)
+    air_held: HeldAir = field(default_factory=set)  # quarantined air values read as missing
 
     def __post_init__(self) -> None:
         self._count_dates = sorted(self.counts)
@@ -137,14 +143,24 @@ def load_gauge(con: duckdb.DuckDBPyConnection) -> dict[date, float]:
     return {d: float(t) for d, t in rows}
 
 
-def load_archive_air(con: duckdb.DuckDBPyConnection) -> AirByDay:
+def held_out_air(con: duckdb.DuckDBPyConnection) -> HeldAir:
+    """The archive air values the gate holds out: quarantined and open, or rejected."""
+    return quality_module("gate").held_out_weather(con)
+
+
+def load_archive_air(con: duckdb.DuckDBPyConnection, held: HeldAir | None = None) -> AirByDay:
+    """Archive air weather by day. A value the gate holds out reads as None, the same as a
+    value the archive never had. `held` defaults to what the gate holds out now."""
     if not _table_exists(con, config.TABLES.weather_daily):
         return {}
+    if held is None:
+        held = held_out_air(con)
     rows = con.execute(f"""
-        SELECT obs_date, temperature_2m_min, temperature_2m_mean
+        SELECT obs_date, {AIR_MIN}, {AIR_MEAN}
         FROM {config.TABLES.weather_daily}
     """).fetchall()
-    return {d: (lo, mean) for d, lo, mean in rows}
+    return {d: (None if (d, AIR_MIN) in held else lo, None if (d, AIR_MEAN) in held else mean)
+            for d, lo, mean in rows}
 
 
 def load_forecast_air(con: duckdb.DuckDBPyConnection, made_on: date) -> AirByDay:
@@ -171,14 +187,23 @@ def load_inputs(con: duckdb.DuckDBPyConnection, air: AirSource,
     if air == "forecast":
         if made_on is None:
             raise ValueError("forecast air weather needs the prediction day")
-        air_values = load_forecast_air(con, made_on)
+        air_values, held = load_forecast_air(con, made_on), set()
     else:
-        air_values = load_archive_air(con)
-    return Inputs(counts=load_counts(con), gauge=load_gauge(con), air=air_values)
+        held = held_out_air(con)
+        air_values = load_archive_air(con, held)
+    return Inputs(counts=load_counts(con), gauge=load_gauge(con), air=air_values, air_held=held)
 
 
 def _below(threshold: float, value: float) -> float:
     return max(0.0, threshold - value)
+
+
+def _no_air(inputs: Inputs, day: date, measures: tuple[str, ...]) -> str:
+    """Why the air weather for `day` is missing: quarantined, or never there."""
+    held = [m for m in measures if (day, m) in inputs.air_held]
+    if held:
+        return f"air temperature for {day} is quarantined ({', '.join(held)})"
+    return f"no air temperature for {day}"
 
 
 def compute(inputs: Inputs, made_on: date) -> tuple[FeatureRow | None, str | None]:
@@ -207,9 +232,9 @@ def compute(inputs: Inputs, made_on: date) -> tuple[FeatureRow | None, str | Non
     air_target = inputs.air.get(target)
     air_today = inputs.air.get(made_on)
     if air_target is None or air_target[0] is None or air_target[1] is None:
-        return None, f"no air temperature for {target}"
+        return None, _no_air(inputs, target, (AIR_MIN, AIR_MEAN))
     if air_today is None or air_today[1] is None:
-        return None, f"no air temperature for {made_on}"
+        return None, _no_air(inputs, made_on, (AIR_MEAN,))
     degree_days = _below(threshold, air_today[1]) + _below(threshold, air_target[1])
 
     values = {
