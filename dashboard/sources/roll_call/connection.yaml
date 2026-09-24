@@ -1,0 +1,6 @@
+# The pipeline writes the four CSV files in this folder. Each .sql file here reads one
+# of them with fixed column types, so an empty file (header only) still loads.
+name: roll_call
+type: duckdb
+options:
+  filename: ":memory:"
