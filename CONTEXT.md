@@ -35,6 +35,13 @@ _Avoid_: discrepancy, error
 Manatees reported arriving after the roll call ended. Never part of a count.
 _Avoid_: additional count, new count
 
+**River temperature**:
+The St. Johns River's water temperature near the park. It has two independent readings: the
+**report temperature**, taken by the researchers at roll call, and the **gauge temperature**,
+recorded continuously by the USGS gauge downstream near DeLand. Distinct from the spring's own
+temperature, which is constant.
+_Avoid_: water temp (ambiguous with the spring), temp
+
 ### Days
 
 **Counted**:
@@ -67,11 +74,17 @@ The model's estimate of the researchers' count for the next calendar day. Made e
 open season; scored only on days that turn out counted.
 _Avoid_: forecast, projection
 
+**Persistence**:
+The prediction that the next count equals the last count. The bar every prediction must beat;
+losing to it over recent scored predictions is what triggers a retrain.
+_Avoid_: naive model, baseline (baseline means something else here)
+
 ### Watching
 
 **Baseline**:
 The fixed reference a check compares against. Replaced once a year when the season closes, with
-the old and new versions kept side by side.
+the old and new versions kept side by side. For weather, it is the normal for each day of the
+year over the trailing 30 years.
 _Avoid_: norm, rolling average
 
 **Quarantined observation**:
