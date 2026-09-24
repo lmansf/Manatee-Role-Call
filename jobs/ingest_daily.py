@@ -26,8 +26,10 @@ Decisions to make as you write it:
     history belongs to jobs/backfill_weather.py, not here.
   - The forecast has no window: fetch today's issue. A missed day's issue is lost, unless
     Open-Meteo's forecast history (docs/sources.md §1c) can fill it.
-  - Order: counts, weather archive, forecast, gauge. Then (stage 2) the checks, the alert
-    email, and the Google Sheet export.
+  - Order: counts, weather archive, forecast, gauge. Then (stage 2) the checks and the alert
+    email. The last step publishes the dashboard, passing the open connection:
+    `publish_dashboard.publish(con)`. It exports the summary CSVs, then commits and pushes them.
+    Decide whether a failed publish should fail the run.
 """
 from __future__ import annotations
 
@@ -36,6 +38,7 @@ import logging
 from roll_call import config  # noqa: F401  (loads .env)
 from roll_call.ingest import blue_spring, open_meteo, usgs_gauge  # noqa: F401
 from roll_call.storage import db  # noqa: F401
+import publish_dashboard  # noqa: F401  (jobs/publish_dashboard.py; this folder is on sys.path)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("roll_call.jobs.ingest_daily")
