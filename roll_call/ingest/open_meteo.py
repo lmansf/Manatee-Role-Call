@@ -20,8 +20,10 @@ never come from the forecast endpoint's `past_days`.
 """
 from __future__ import annotations
 
-from datetime import date
+import json
+from datetime import date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -102,38 +104,112 @@ def fetch_archive(start: date, end: date, session: requests.Session | None = Non
         raise
 
 
-def fetch_forecast(session: requests.Session | None = None) -> IngestResult:
-    """Fetch today's 7-day daily forecast. Records are keyed by (issue_date, target_date).
+def fetch_forecast(
+    issue_date: date | None = None, session: requests.Session | None = None
+) -> IngestResult:
+    """Fetch the 7-day daily forecast. Records are keyed by (issue_date, target_date).
 
-    TODO(owner): mirror fetch_archive. `issue_date` is today's date in config.TIMEZONE, not
-    UTC; a run just after midnight UTC is still "yesterday" in Florida. parse_daily can be
-    reused if you let it take the issue date as an extra key, or write a sibling.
+    `issue_date` defaults to today in config.TIMEZONE, not UTC. A run just after midnight
+    UTC is still the previous day in Florida. The response's first day is not used for it.
+    Keeps the raw response text on the result. Records the run either way.
     """
-    raise NotImplementedError
+    run = IngestRun(source=FORECAST_SOURCE_NAME, source_url=FORECAST_URL)
+    sess = session or requests.Session()
+    try:
+        issued = issue_date or local_today()
+        resp = sess.get(FORECAST_URL, params=build_forecast_params(), timeout=30)
+        resp.raise_for_status()
+        raw = resp.text
+        run.payload_sha256 = sha256_text(raw)
+        records = parse_forecast(resp.json(), issued)
+        run.succeed(len(records))
+        return IngestResult(run=run, raw=raw, records=records)
+    except Exception as exc:  # noqa: BLE001 - the run record is the error channel
+        run.fail(exc)
+        raise
 
 
-def parse_hourly(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    """Row-orient the `hourly` block: one record per hour with obs_ts and temperature_2m.
+def local_today() -> date:
+    """Today's date in config.TIMEZONE."""
+    return datetime.now(ZoneInfo(config.TIMEZONE)).date()
 
-    TODO(owner): same shape as parse_daily. Timestamps arrive as local ISO strings without
-    an offset because of the `timezone` param; decide whether to store them naive-local
-    or convert to UTC. Whatever you pick, the daily-mean cross-check against the API's
-    temperature_2m_mean has to group by local day, or it will be off at the edges.
+
+def _columns(payload: dict[str, Any], block: str, fields: tuple[str, ...]) -> dict[str, list]:
+    """Pull `time` plus each field from a column-oriented block and check they line up.
+
+    Raises ValueError when the block or a field is missing, or when the arrays differ in
+    length. Zipping unequal arrays would drop values without a trace.
     """
-    raise NotImplementedError
+    data = payload.get(block)
+    if not isinstance(data, dict):
+        raise ValueError(f"Open-Meteo response has no '{block}' block")
+    names = ("time", *fields)
+    missing = [name for name in names if name not in data]
+    if missing:
+        raise ValueError(f"Open-Meteo '{block}' block is missing {', '.join(missing)}")
+    lengths = {name: len(data[name]) for name in names}
+    if len(set(lengths.values())) > 1:
+        detail = ", ".join(f"{name}={n}" for name, n in lengths.items())
+        raise ValueError(f"Open-Meteo '{block}' arrays differ in length: {detail}")
+    return {name: data[name] for name in names}
+
+
+def _float(value: Any) -> float | None:
+    return None if value is None else float(value)
 
 
 def parse_daily(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    """Turn Open-Meteo's column-oriented `daily` block into row-oriented records.
+    """Turn Open-Meteo's column-oriented `daily` block into weather_daily records.
 
-    Each record should carry: obs_date (date), one key per field in DAILY_FIELDS, and the
-    unit for each field from `daily_units` (or a single `units` dict, your call).
-
-    TODO(owner): implement. Things to decide as you go:
-      - Open-Meteo returns null for days it has no data (the archive lags ~5 days).
-        Do you keep those rows with nulls, or drop them? The null-rate check in stage 2
-        behaves very differently depending on this answer.
-      - The arrays are positionally aligned. Assert they're the same length before zipping;
-        a silent mismatch here is exactly the kind of thing this project is about.
+    Each record has obs_date, one key per field in DAILY_FIELDS, and `units`: the
+    response's `daily_units` as a JSON string. Days the archive has not filled yet come
+    back as nulls. They stay as rows with None values, so the null-rate check can see them.
+    Raises ValueError if the arrays are not all the same length.
     """
-    raise NotImplementedError
+    cols = _columns(payload, "daily", DAILY_FIELDS)
+    units = payload.get("daily_units")
+    if not isinstance(units, dict):
+        raise ValueError("Open-Meteo response has no 'daily_units'")
+    units_json = json.dumps(units, sort_keys=True, ensure_ascii=False)
+    records = []
+    for i, day in enumerate(cols["time"]):
+        record: dict[str, Any] = {"obs_date": date.fromisoformat(day)}
+        for name in DAILY_FIELDS:
+            record[name] = _float(cols[name][i])
+        record["units"] = units_json
+        records.append(record)
+    return records
+
+
+def parse_forecast(payload: dict[str, Any], issue_date: date) -> list[dict[str, Any]]:
+    """Turn a forecast response into weather_forecast_daily records.
+
+    Same parsing as parse_daily. Each day becomes a target_date under the given issue_date.
+    """
+    records = []
+    for row in parse_daily(payload):
+        target = row.pop("obs_date")
+        records.append({"issue_date": issue_date, "target_date": target, **row})
+    return records
+
+
+def parse_hourly(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Row-orient the `hourly` block into weather_hourly records.
+
+    Each record has obs_ts, temperature_2m and `unit` from `hourly_units`. Timestamps arrive
+    as local ISO strings without an offset because the request sets `timezone`. They are
+    kept as naive local datetimes in config.TIMEZONE, so grouping by obs_ts's date gives
+    the same local day as the daily block. Null hours stay as rows with None values.
+    Raises ValueError if the arrays are not all the same length.
+    """
+    cols = _columns(payload, "hourly", HOURLY_FIELDS)
+    units = payload.get("hourly_units")
+    if not isinstance(units, dict) or "temperature_2m" not in units:
+        raise ValueError("Open-Meteo response has no hourly unit for temperature_2m")
+    unit = units["temperature_2m"]
+    return [
+        {"obs_ts": datetime.fromisoformat(ts), "temperature_2m": _float(value), "unit": unit}
+        for ts, value in zip(cols["time"], cols["temperature_2m"], strict=True)
+    ]
+
+
