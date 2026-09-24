@@ -21,6 +21,16 @@ The number of manatees one counter reports at one roll call. The researchers' co
 modelling target; the park count is a separate series, never a substitute for it.
 _Avoid_: total, sighting, "the number"
 
+**Estimate**:
+A count the researchers describe as approximate rather than tallied. Still a count, still the
+target, always marked as an estimate.
+_Avoid_: guess, rough count
+
+**Counter disagreement**:
+The gap between the researchers' count and the park count at the same roll call. Watched over
+time; never a reason to doubt either count on its own.
+_Avoid_: discrepancy, error
+
 **Late arrivals**:
 Manatees reported arriving after the roll call ended. Never part of a count.
 _Avoid_: additional count, new count
@@ -45,6 +55,17 @@ closes after a run of silent weekdays once March has begun.
 **Latest plausible start**:
 The date after which a season that has not yet opened is treated as a failure to hear from the
 source, not a late winter.
+
+### Predicting
+
+**Forecast**:
+Open-Meteo's prediction of future weather. Only ever weather.
+_Avoid_: using it for the model's output
+
+**Prediction**:
+The model's estimate of the researchers' count for the next calendar day. Made every day of an
+open season; scored only on days that turn out counted.
+_Avoid_: forecast, projection
 
 ### Watching
 
