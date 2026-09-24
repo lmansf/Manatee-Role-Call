@@ -87,29 +87,39 @@ def season_year_start(today: date) -> date:
     return start if start <= today else date(today.year - 1, month, day)
 
 
-def catch_up_start(last_success: datetime | None, overlap_days: int, first_run_start: date) -> date:
+def catch_up_start(last_success: datetime | None, overlap_days: int, first_run_start: date,
+                   today: date | None = None) -> date:
     """First day to fetch: the last success's local date minus the overlap, or
-    `first_run_start` when the source has never succeeded."""
+    `first_run_start` when the source has never succeeded.
+
+    The last success is a wall-clock time. When the run is for an earlier day (`--today` in the
+    past), that time lies after `today`, so the window is measured from `today` instead.
+    Otherwise a re-run of a past day would fetch nothing.
+    """
     if last_success is None:
         return first_run_start
-    return local_date(last_success) - timedelta(days=overlap_days)
+    anchor = local_date(last_success)
+    if today is not None and anchor > today:
+        anchor = today
+    return anchor - timedelta(days=overlap_days)
 
 
 def counts_window_start(con, today: date) -> date:
     return catch_up_start(db.last_successful_run(con, COUNTS_SOURCE),
-                          COUNTS_OVERLAP_DAYS, season_year_start(today))
+                          COUNTS_OVERLAP_DAYS, season_year_start(today), today)
 
 
 def archive_window(con, today: date) -> tuple[date, date]:
     """The archive's window ends yesterday, the last complete day."""
     first = today - timedelta(days=FIRST_RUN_LOOKBACK_DAYS)
-    start = catch_up_start(db.last_successful_run(con, ARCHIVE_SOURCE), ARCHIVE_OVERLAP_DAYS, first)
+    start = catch_up_start(db.last_successful_run(con, ARCHIVE_SOURCE), ARCHIVE_OVERLAP_DAYS, first,
+                           today)
     return start, today - timedelta(days=1)
 
 
 def gauge_window(con, today: date) -> tuple[date, date]:
     first = today - timedelta(days=FIRST_RUN_LOOKBACK_DAYS)
-    start = catch_up_start(db.last_successful_run(con, GAUGE_SOURCE), GAUGE_OVERLAP_DAYS, first)
+    start = catch_up_start(db.last_successful_run(con, GAUGE_SOURCE), GAUGE_OVERLAP_DAYS, first, today)
     return start, today
 
 
@@ -215,9 +225,25 @@ STAGES: tuple[tuple[str, Callable[[Any, RunState], None]], ...] = (
 )
 
 
+def ensure_schema(con) -> None:
+    """Create every table the stages read, before any stage runs.
+
+    Modules create their own tables on first use, but a stage can read a table another module
+    owns before that module has run: the training gate reads clearing_decisions, which the
+    baselines module creates. Creating them all up front removes that ordering dependency.
+    """
+    from roll_call.model import store as model_store
+    from roll_call.quality import baselines, store as quality_store
+
+    quality_store.ensure_tables(con)
+    baselines.ensure_tables(con)
+    model_store.ensure_tables(con)
+
+
 def run_stages(con, today: date) -> RunState:
     """Run every stage in order. A failure is logged and recorded, and the next stage runs."""
     state = RunState(today=today)
+    ensure_schema(con)
     for name, stage in STAGES:
         try:
             stage(con, state)

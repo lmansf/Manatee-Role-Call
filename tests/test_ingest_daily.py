@@ -101,7 +101,10 @@ class Pipeline:
         install_fake(monkeypatch, "roll_call.quality.alert",
                      send_alert=lambda r: step("send_alert", r is report, value=False))
         install_fake(monkeypatch, "roll_call.quality.baselines",
-                     refresh_if_due=lambda con, today: step("refresh_if_due", today, value=False))
+                     refresh_if_due=lambda con, today: step("refresh_if_due", today, value=False),
+                     ensure_tables=lambda con: None)
+        install_fake(monkeypatch, "roll_call.quality.store", ensure_tables=lambda con: None)
+        install_fake(monkeypatch, "roll_call.model.store", ensure_tables=lambda con: None)
         install_fake(monkeypatch, "roll_call.model.train",
                      retrain_if_needed=lambda con, today: step("retrain_if_needed", today, value=False))
         install_fake(monkeypatch, "roll_call.model.predict",
@@ -211,3 +214,12 @@ def test_failed_checks_skip_the_alert_but_not_the_rest(pipeline, db_path):
 def test_failed_publish_fails_the_run(pipeline, db_path):
     pipeline.fail.add("publish")
     assert run(db_path) == 1
+
+
+def test_catch_up_never_starts_after_the_day_being_run():
+    """A re-run of a past day (--today) measures its window from that day, not from the
+    wall-clock time of a later successful run."""
+    from datetime import datetime, timezone
+    later_run = datetime(2026, 9, 24, 23, 0, tzinfo=timezone.utc)
+    start = ingest_daily.catch_up_start(later_run, 7, date(2025, 7, 1), today=date(2025, 12, 1))
+    assert start == date(2025, 11, 24)
