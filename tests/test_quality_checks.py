@@ -277,6 +277,8 @@ def test_count_outside_plausible_range_is_quarantined(con):
     healthy(con)
     add_count(con, TODAY - timedelta(days=2), researchers=2000)
     add_count(con, TODAY - timedelta(days=1), researchers=40, park=-1)
+    for i in (1, 2):  # joined to the gauge, so join retention stays quiet
+        add_gauge(con, TODAY - timedelta(days=i), 18.0)
     report = checks.run_checks(con, TODAY)
     values = {q["obs_id"]: q["value"] for q in report.new_quarantine}
     assert values == {
@@ -340,11 +342,121 @@ def test_counter_disagreement_is_a_measure_and_never_quarantines(con):
     day = TODAY - timedelta(days=1)
     add_count(con, day, researchers=100, park=900)
     add_count(con, TODAY - timedelta(days=2), not_counted=True)
+    add_gauge(con, day, 18.0)
     report = checks.run_checks(con, TODAY)
     assert report.new_quarantine == [] and report.new_incidents == []
     assert report.measures["counter_disagreement"] == [
         {"report_date": day, "count_researchers": 100, "count_park": 900,
          "counter_disagreement": -800}]
+    assert con.execute("SELECT count(*) FROM quarantine").fetchone()[0] == 0
+    assert store.open_incidents(con) == []
+
+
+def stored(con, measure):
+    return con.execute(
+        "SELECT obs_key, observation_date, value FROM measures WHERE measure = ? ORDER BY obs_key",
+        [measure]).fetchall()
+
+
+def test_counter_disagreement_is_stored_and_overwritten_on_rerun(con):
+    healthy(con)
+    d0, d1 = TODAY - timedelta(days=2), TODAY - timedelta(days=1)
+    add_count(con, d0, researchers=100, park=90)
+    add_count(con, d1, researchers=50)  # no park count: no disagreement
+    checks.run_checks(con, TODAY)
+    assert stored(con, "counter_disagreement") == [(d0.isoformat(), d0, 10.0)]
+    first_at = con.execute("SELECT computed_at FROM measures").fetchone()[0]
+    assert first_at is not None
+
+    # The park count is corrected and the park reports the next day: the re-run overwrites
+    # its own row and the history grows by one.
+    con.execute("UPDATE blue_spring_counts_daily SET count_park = 70 WHERE report_date = ?", [d0])
+    con.execute("UPDATE blue_spring_counts_daily SET count_park = 80 WHERE report_date = ?", [d1])
+    checks.run_checks(con, TODAY)
+    assert stored(con, "counter_disagreement") == [(d0.isoformat(), d0, 30.0),
+                                                   (d1.isoformat(), d1, -30.0)]
+
+
+# --- Join retention ---
+
+RETENTION = ((checks.COUNTS, "join_retention:gauge"), (checks.COUNTS, "join_retention:weather"))
+
+
+def _joined_days(con, days, gauge=True, weather=True):
+    for d in days:
+        add_count(con, d, researchers=100)
+        if gauge:
+            add_gauge(con, d, 18.0)
+        if weather:
+            add_weather(con, d)
+
+
+def test_join_retention_passes_when_every_counted_day_joins(con):
+    healthy(con)
+    days = [TODAY - timedelta(days=i) for i in range(1, 16)]
+    _joined_days(con, days)
+    report = checks.run_checks(con, TODAY)
+    assert not set(RETENTION) & incident_keys(report.new_incidents)
+    assert stored(con, "join_retention:gauge") == [(TODAY.isoformat(), TODAY, 1.0)]
+    assert stored(con, "join_retention:weather") == [(TODAY.isoformat(), TODAY, 1.0)]
+
+
+def test_join_retention_opens_then_closes_for_the_gauge_and_the_weather(con):
+    healthy(con)
+    days = [TODAY - timedelta(days=i) for i in range(checks.ARCHIVE_LAG_DAYS + 1,
+                                                        checks.ARCHIVE_LAG_DAYS + 11)]
+    _joined_days(con, days[:8])
+    _joined_days(con, days[8:], gauge=False, weather=False)  # 8 of 10 join: 80%
+    report = checks.run_checks(con, TODAY)
+    assert set(RETENTION) <= incident_keys(report.new_incidents)
+    detail = {i["check_name"]: i["detail"] for i in report.new_incidents}
+    assert "8 of 10" in detail["join_retention:gauge"]
+    assert stored(con, "join_retention:gauge") == [(TODAY.isoformat(), TODAY, 0.8)]
+    assert stored(con, "join_retention:weather") == [(TODAY.isoformat(), TODAY, 0.8)]
+
+    for d in days[8:]:
+        add_gauge(con, d, 18.0)
+        add_weather(con, d)
+    report = checks.run_checks(con, TODAY)
+    assert set(RETENTION) <= incident_keys(report.closed_incidents)
+    assert stored(con, "join_retention:gauge") == [(TODAY.isoformat(), TODAY, 1.0)]
+
+
+def test_join_retention_skips_the_archive_lag(con):
+    healthy(con)
+    old = [TODAY - timedelta(days=i) for i in range(checks.ARCHIVE_LAG_DAYS + 1,
+                                                       checks.ARCHIVE_LAG_DAYS + 4)]
+    _joined_days(con, old)
+    # Inside the lag: gauge present, weather rows null by design or not there yet.
+    recent = [TODAY - timedelta(days=i) for i in range(1, checks.ARCHIVE_LAG_DAYS + 1)]
+    _joined_days(con, recent, weather=False)
+    for d in recent[:2]:
+        add_weather(con, d, **{f: None for f in checks.WEATHER_FIELDS})
+    # Today's gauge daily mean does not exist yet.
+    add_count(con, TODAY, researchers=100)
+    report = checks.run_checks(con, TODAY)
+    assert not set(RETENTION) & incident_keys(report.new_incidents)
+    assert stored(con, "join_retention:weather") == [(TODAY.isoformat(), TODAY, 1.0)]
+    assert stored(con, "join_retention:gauge") == [(TODAY.isoformat(), TODAY, 1.0)]
+
+
+def test_join_retention_ignores_days_that_were_not_counted(con):
+    healthy(con)
+    days = [TODAY - timedelta(days=i) for i in range(checks.ARCHIVE_LAG_DAYS + 1,
+                                                        checks.ARCHIVE_LAG_DAYS + 4)]
+    _joined_days(con, days)
+    for i in range(checks.ARCHIVE_LAG_DAYS + 4, checks.ARCHIVE_LAG_DAYS + 10):
+        add_count(con, TODAY - timedelta(days=i), not_counted=True)  # nothing joins
+    report = checks.run_checks(con, TODAY)
+    assert not set(RETENTION) & incident_keys(report.new_incidents)
+    assert stored(con, "join_retention:gauge") == [(TODAY.isoformat(), TODAY, 1.0)]
+
+
+def test_join_retention_with_nothing_counted_stores_nothing(con):
+    healthy(con)  # its only count is outside the lookback window
+    checks.run_checks(con, TODAY)
+    assert stored(con, "join_retention:gauge") == []
+    assert stored(con, "join_retention:weather") == []
 
 
 # --- Cross-source ---

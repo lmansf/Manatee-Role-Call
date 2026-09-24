@@ -1,5 +1,5 @@
-"""Incidents and quarantine: idempotent writes against an in-memory DuckDB."""
-from datetime import date
+"""Incidents, quarantine and measures: idempotent writes against an in-memory DuckDB."""
+from datetime import date, datetime
 
 import duckdb
 import pytest
@@ -68,3 +68,29 @@ def test_mark_alerted(con):
     store.mark_alerted(con, [inc["incident_id"]], ["t:k"])
     assert con.execute("SELECT count(*) FROM incidents WHERE alerted_at IS NULL").fetchone()[0] == 0
     assert con.execute("SELECT count(*) FROM quarantine WHERE alerted_at IS NULL").fetchone()[0] == 0
+
+
+def test_ensure_tables_creates_measures(con):
+    assert store.table_exists(con, "measures")
+    columns = con.execute(
+        "SELECT column_name, data_type FROM information_schema.columns "
+        "WHERE table_name = 'measures' ORDER BY ordinal_position").fetchall()
+    assert columns == [("measure", "VARCHAR"), ("obs_key", "VARCHAR"),
+                       ("observation_date", "DATE"), ("value", "DOUBLE"),
+                       ("computed_at", "TIMESTAMP")]
+
+
+def test_record_measure_replaces_by_measure_and_key(con):
+    day = date(2026, 1, 5)
+    store.record_measure(con, "counter_disagreement", "2026-01-05", day, 10,
+                         now=datetime(2026, 1, 5, 12))
+    store.record_measure(con, "counter_disagreement", "2026-01-05", day, -4,
+                         now=datetime(2026, 1, 6, 12))
+    store.record_measure(con, "counter_disagreement", "2026-01-06", date(2026, 1, 6), 3)
+    store.record_measure(con, "join_retention:gauge", "2026-01-05", day, 1.0)
+    rows = con.execute("SELECT measure, obs_key, value, computed_at FROM measures "
+                       "ORDER BY measure, obs_key").fetchall()
+    assert [r[:3] for r in rows] == [("counter_disagreement", "2026-01-05", -4.0),
+                                     ("counter_disagreement", "2026-01-06", 3.0),
+                                     ("join_retention:gauge", "2026-01-05", 1.0)]
+    assert rows[0][3] == datetime(2026, 1, 6, 12)

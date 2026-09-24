@@ -1,4 +1,5 @@
-"""The daily checks (spec §5): freshness, volume, distribution, counts and cross-source.
+"""The daily checks (spec §5): freshness, volume, distribution, counts, cross-source and join
+retention.
 
 A check either judges a source or judges one observation.
 
@@ -7,7 +8,10 @@ A check either judges a source or judges one observation.
 - A doubted observation is quarantined until a person clears it. Counts are never judged
   by standard deviations (ADR 0001): only by a hard range and by jumps that contradict the
   river temperature. Weather values are judged against the normal for their day of the year.
-- Counter disagreement is a measure, reported and never quarantined.
+- Counter disagreement is a measure, stored in the measures table and never quarantined.
+- Join retention is the share of counted report dates that have a gauge value, and the share
+  that have archive weather, for the same date. Both shares are stored as measures, and a low
+  share opens an incident on the counts source.
 
 Every threshold below is a placeholder. Calibrate them from the historical seasons (spec §8)
 before trusting an alert.
@@ -97,6 +101,9 @@ JUMP_MAX_GAP_DAYS = 4
 CROSS_SOURCE_MAX_SHIFT_C = 2.0
 CROSS_SOURCE_TRAILING = 30
 CROSS_SOURCE_MIN_TRAILING = 5
+# Join retention: the least share of counted report dates that must have a gauge value, and
+# archive weather, for the same date.
+JOIN_RETENTION_MIN_SHARE = 0.9
 
 
 @dataclass
@@ -427,6 +434,10 @@ def check_counts(run: _Run, since: date) -> None:
                                      "count_park": park,
                                      "counter_disagreement": researchers - park})
         run.report.measures["counter_disagreement"] = disagreement
+        for row in disagreement:
+            day = row["report_date"]
+            store.record_measure(con, "counter_disagreement", day.isoformat(), day,
+                                 row["counter_disagreement"])
 
         counted = [(d, n, _f_to_c(f)) for d, n, _, f in rows if n is not None]
         for (d0, n0, r0), (d1, n1, r1) in zip(counted, counted[1:]):
@@ -479,6 +490,68 @@ def check_cross_source(run: _Run) -> None:
     run.guard(COUNTS, "report vs gauge temperature", report_vs_gauge)
 
 
+# --- Join retention ---
+
+
+def check_join_retention(run: _Run, since: date) -> None:
+    """The share of counted report dates from `since` that have a gauge value, and the share
+    that have archive weather, for the same date. Each share is stored as a measure keyed by
+    the run date. A share below JOIN_RETENTION_MIN_SHARE opens an incident on the counts
+    source, and the incident closes when the share recovers.
+
+    The weather share leaves out report dates inside the archive's lag, whose weather is null
+    by design. The gauge share leaves out today, whose daily mean exists only once the day is
+    over. A share with no report dates to look at leaves its incident as it is."""
+    con, today = run.con, run.report.today
+
+    def join_retention() -> None:
+        if not store.table_exists(con, T.counts_daily):
+            return
+        counted = [r[0] for r in con.execute(
+            f"""SELECT DISTINCT report_date FROM {T.counts_daily}
+                WHERE report_date BETWEEN ? AND ? AND count_researchers IS NOT NULL
+                  AND NOT coalesce(not_counted, false)
+                ORDER BY report_date""",
+            [since, today],
+        ).fetchall()]
+        if not counted:
+            return
+
+        gauge_days: set[date] = set()
+        if store.table_exists(con, T.gauge_daily):
+            gauge_days = {r[0] for r in con.execute(
+                f"""SELECT DISTINCT obs_date FROM {T.gauge_daily}
+                    WHERE obs_date BETWEEN ? AND ? AND water_temp_c IS NOT NULL""",
+                [since, today],
+            ).fetchall()}
+        weather_days: set[date] = set()
+        if store.table_exists(con, T.weather_daily):
+            weather_days = {r[0] for r in con.execute(
+                f"""SELECT DISTINCT obs_date FROM {T.weather_daily}
+                    WHERE obs_date BETWEEN ? AND ?
+                      AND coalesce({', '.join(WEATHER_FIELDS)}) IS NOT NULL""",
+                [since, today],
+            ).fetchall()}
+
+        # Report dates before `end` are judged; the same cut-off as the archive null rate.
+        for name, joined, end in (("gauge", gauge_days, today),
+                                  ("weather", weather_days,
+                                   today - timedelta(days=ARCHIVE_LAG_DAYS))):
+            days = [d for d in counted if d < end]
+            if not days:
+                continue
+            kept = sum(d in joined for d in days)
+            share = kept / len(days)
+            check_name = f"join_retention:{name}"
+            store.record_measure(con, check_name, today.isoformat(), today, share)
+            run.settle(COUNTS, check_name, share < JOIN_RETENTION_MIN_SHARE,
+                       f"{kept} of {len(days)} counted report dates from {since} to "
+                       f"{end - timedelta(days=1)} have {name} data ({share:.0%}), "
+                       f"limit {JOIN_RETENTION_MIN_SHARE:.0%}")
+
+    run.guard(COUNTS, "join retention", join_retention)
+
+
 # --- Entry point ---
 
 
@@ -502,6 +575,7 @@ def run_checks(con: duckdb.DuckDBPyConnection, today: date, since: date | None =
     check_weather_normals(run, since)
     check_counts(run, since)
     check_cross_source(run)
+    check_join_retention(run, since)
 
     for source in SOURCES:
         if source not in run.errored:
