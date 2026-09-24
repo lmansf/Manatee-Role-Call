@@ -3,28 +3,9 @@
 A data pipeline whose real subject is the **data-quality layer**. The manatee prediction is the
 excuse; the point of the project is catching a source that changes underneath you.
 
-Vocabulary is defined in [`CONTEXT.md`](CONTEXT.md) and used strictly here: *count*, *counter*,
-*roll call*, *forecast* (weather only) and *prediction* (the model's output) mean exactly what
-the glossary says. Decisions that were hard to reverse or surprising are recorded in
-[`docs/adr/`](docs/adr/). Source endpoints and scraping notes are in
+Terms mean exactly what [`CONTEXT.md`](CONTEXT.md) says. The reasons behind hard-to-reverse
+choices are in [`docs/adr/`](docs/adr/). Endpoints and scraping notes are in
 [`docs/sources.md`](docs/sources.md).
-
----
-
-## Kickoff prompt (for a fresh coding session)
-
-> I'm building a portfolio data project called **Roll Call**: a Python pipeline, run daily by a
-> systemd timer on my Ubuntu machine and storing everything in one DuckDB file, that predicts
-> tomorrow's manatee count at Blue Spring State Park from weather and river temperature. The
-> real focus is the data-quality layer around it: freshness, volume and consistency checks,
-> quarantine for doubtful observations, incidents for failing sources, and a public Evidence
-> dashboard on Vercel, rebuilt from summary CSVs that each run pushes to the repo.
->
-> Read `roll-call-spec.md`, `CONTEXT.md` and `docs/adr/` first. I write the code myself where
-> it's instructive: give me structure, let me fill in the logic, and flag where I'd learn more
-> by hitting the problem first.
-
----
 
 ## 1. Purpose
 
@@ -33,12 +14,27 @@ what the pipeline did when a source drifted, went stale, or started lying.
 
 Deliverables: a GitHub repo, an Evidence dashboard site on Vercel, and a short written walkthrough.
 
+### Flow
+
+One daily run, in order:
+
+1. **Ingest.** Each source is fetched from its last successful run onward (§2, catch-up). The
+   raw payload and the parsed rows land in DuckDB, and every run is logged, failures included.
+2. **Check.** Freshness, volume, distribution and consistency checks run against the baselines
+   (§5). A doubtful observation is quarantined. A failing source opens an incident.
+3. **Alert.** One email lists anything new that opened (§5).
+4. **Predict.** In an open season, the model predicts tomorrow's count from the observations
+   that aren't quarantined (§4).
+5. **Publish.** Summary CSVs are exported, committed and pushed. Vercel rebuilds the site (§6).
+
+Once a year at season close, the baselines refresh and the model retrains (§4, §5).
+
 ## 2. Platform
 
 See [ADR 0002](docs/adr/0002-local-scheduled-script-with-duckdb.md).
 
 - **Runs on:** the owner's Ubuntu machine, as a plain Python script, from a runner clone of the
-  repo at `~/roll-call-runner`. The runner clone stays on `main` and is never used for editing.
+  repo at `~/roll-call-runner`. The runner clone stays on `main` and only the timers use it.
 - **Schedule:** a systemd user timer at 19:00 local, `Persistent=true` so a run missed while the
   machine was off or asleep fires when it's back. Setup: [`docs/scheduling.md`](docs/scheduling.md).
 - **Catch-up:** every run fetches everything since the last successful run for each source, not
@@ -56,8 +52,9 @@ See [ADR 0002](docs/adr/0002-local-scheduled-script-with-duckdb.md).
 - **Backup:** clearing decisions and the baseline refresh log are exported as CSV and committed
   (they are the records only a person could make). The whole database file is copied weekly to
   a second disk by a second timer.
-- **Not used:** Databricks (outbound allowlist, quota shutdowns), GitHub Actions (owner's call),
-  Dagster (a separate learning series), Tableau Public with Google Sheets (ADR 0003).
+- **Not used:** Databricks and GitHub Actions ([ADR 0002](docs/adr/0002-local-scheduled-script-with-duckdb.md)),
+  Tableau Public ([ADR 0003](docs/adr/0003-evidence-on-vercel-instead-of-tableau.md)), and
+  Dagster, which the owner is learning in a separate series.
 
 ## 3. Data sources
 
@@ -69,7 +66,7 @@ See [ADR 0002](docs/adr/0002-local-scheduled-script-with-duckdb.md).
 - Each report can give two counts, the researchers' and the park's, plus the report temperature.
 - Historical seasons 2018–19 onward are extracted once by `tools/extract_seasons.py` into one
   CSV per season, reviewed, then aggregated (aggregation rule still open, §8).
-- A hand-transcribed 2025–26 set in `data/reference/` scores the extraction. It is never a source.
+- A hand-transcribed 2025–26 set in `data/reference/` scores the extraction and feeds nothing else.
 
 ### 3.2 Open-Meteo (weather)
 
@@ -78,7 +75,7 @@ See [ADR 0002](docs/adr/0002-local-scheduled-script-with-duckdb.md).
   pinned (see `docs/sources.md` §1).
 - **Forecast:** the 7-day daily forecast for the same fields, stored every run with its issue
   date. Feeds live predictions. Forecast revisions between issues are genuine drift.
-- The live run never uses observed air weather; the archive lag makes yesterday's unavailable.
+- Live runs take air weather from the forecast, because the archive lags about five days.
 
 ### 3.3 USGS gauge 02236000, St. Johns River near DeLand (river temperature)
 
@@ -103,9 +100,9 @@ See [ADR 0002](docs/adr/0002-local-scheduled-script-with-duckdb.md).
 
 ## 4. The model
 
-- **Target:** the researchers' count. Park counts are never substituted. Estimates are included
-  and flagged, so scores can be computed with and without them. Counts written as sums are
-  ordinary counts.
+- **Target:** the researchers' count alone. The park count stays its own series. Estimates are
+  included and flagged, so scores can be computed with and without them. Counts written as
+  sums are ordinary counts.
 - **Prediction:** tomorrow's count, for every calendar day of an open season. Scored only on days
   that turn out counted.
 - **Model:** a count regression (Poisson or negative binomial) with hand-picked features. Feature
@@ -120,10 +117,10 @@ See [ADR 0002](docs/adr/0002-local-scheduled-script-with-duckdb.md).
 
 ### Retraining
 
-- **Triggered by performance, never by quality flags.** Retrain when the model does worse than
-  persistence over the last 10 scored predictions, and once a year at season close.
-- Quarantined observations are excluded from training until cleared. Flags gate the training
-  set; performance triggers the retrain.
+- **Performance triggers the retrain.** Retrain when the model does worse than persistence over
+  the last 10 scored predictions, and once a year at season close.
+- **Quality flags gate the training set.** Quarantined observations stay out of training until
+  cleared. A flag decides what the model trains on, and performance decides when.
 
 ## 5. The quality layer
 
@@ -134,16 +131,16 @@ See [ADR 0002](docs/adr/0002-local-scheduled-script-with-duckdb.md).
 | **Freshness** | Last successful run per source. Season-aware: the season opens at the first report; no opening after the latest plausible start is an incident; the season closes after five silent weekdays once March begins. Unreported weekends are normal. |
 | **Volume** | Rows per run against expectation; duplicate rejection; join retention between counts, weather and gauge by date. |
 | **Distribution** | Null rate per column; units against the pinned units. Weather fields: beyond three standard deviations of the 30-year normal for that day of the year. |
-| **Counts** | Not judged by standard deviations ([ADR 0001](docs/adr/0001-counts-not-judged-by-standard-deviations.md)). Plausible range, and jumps that contradict the river temperature. Counter disagreement is monitored, never a reason to quarantine. |
+| **Counts** | Not judged by standard deviations ([ADR 0001](docs/adr/0001-counts-not-judged-by-standard-deviations.md)). Plausible range, and jumps that contradict the river temperature. Counter disagreement is monitored as its own measure. |
 | **Cross-source** | Report temperature against gauge temperature. |
 
 Structural checks catch schema drift. Value-level checks catch the nastier cases: a column that
 was always populated arriving null, or a renamed field silently dropping joined rows.
 
-**Join keys:** surrogate keys on stable identifiers (site, date, counter), never display names.
+**Join keys:** surrogate keys built from stable identifiers: site, date and counter.
 
-**Thresholds** start as placeholders (latest plausible start 15 November, five silent weekdays,
-counts 0–1,500) and are calibrated from the historical seasons once extracted.
+**Thresholds** start as placeholders in `roll_call/config.py` and are calibrated from the
+historical seasons once extracted (§8).
 
 ### Baselines
 
@@ -157,10 +154,11 @@ counts 0–1,500) and are calibrated from the historical seasons once extracted.
 
 ### Quarantine, incidents and clearing
 
-- A doubtful observation is **quarantined**: kept, never dropped, held out of training.
-- A failing source-level check opens an **incident**, which closes itself when the check passes.
-- The owner **clears** quarantined observations in a local Jupyter notebook: confirmed real or
-  rejected, with a reason, written to the database. A big number is not automatically bad data.
+Definitions are in `CONTEXT.md`. How they work here:
+
+- The owner clears quarantined observations in a local Jupyter notebook that writes each
+  decision and its reason to the database.
+- Verify a surprising value against the world before rejecting it. An unusual count may be real.
 
 ### Alerting
 
@@ -174,29 +172,17 @@ An [Evidence](https://evidence.dev) site deployed on Vercel. Evidence builds a s
 SQL and Markdown and runs its queries at build time. Why not Tableau Public:
 [ADR 0003](docs/adr/0003-evidence-on-vercel-instead-of-tableau.md).
 
-**The path:**
-
-1. The daily run ends with `jobs/publish_dashboard.py`. It computes the summaries in Python and
-   writes them as CSV into `dashboard/sources/roll_call/`.
-2. If any file changed, it commits only that folder and `data/records/`, then pushes to `main`.
-   It refuses to run on another branch or with other uncommitted changes.
-3. Vercel sees the push and rebuilds the site from `dashboard/`.
-
-**The files:**
-
-| File | Contents |
-|---|---|
-| `meta.csv` | When the data was generated. |
-| `source_status.csv` | Per source: last successful run, rows against expectation, null rate against normal. |
-| `baseline_drift.csv` | Per baseline refresh: old and new values, and whether the refresh was replayed. |
-| `quarantine_queue.csv` | Per quarantined observation: source, check, dates quarantined and cleared, outcome. |
+The daily run's publish step writes the summary CSVs into `dashboard/sources/roll_call/`, and
+commits and pushes them with `data/records/` (§2). Vercel rebuilds the site from `dashboard/` on
+each push. The files and their columns are defined by `COLUMNS` in
+`roll_call/export/dashboard.py` and match the header row of each CSV.
 
 **Write summaries, not raw logs:** metrics are precomputed in Python, and the site only charts
 them.
 
 **Public by design:** the repo and the site are public. The CSVs carry dates, source and check
-names, numbers and statuses only. Report text names people and never goes there, and neither do
-clearing reasons. The DuckDB file is never committed.
+names, numbers and statuses only. Report text, which names people, and clearing reasons stay in
+the database, and the database file stays on the owner's machine.
 
 **Staleness:** the site shows when its data was generated and warns when that is more than two
 days old. The owner's machine may be off, and the dashboard has to say so.

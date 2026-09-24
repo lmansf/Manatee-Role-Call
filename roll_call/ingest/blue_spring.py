@@ -4,7 +4,7 @@ There is no API. Reports are HTML posts, written by people, and the wording drif
 "Total of 412 manatees" one day, "412 manatees counted" the next, "no count today due to
 fog" on a third. That is the point. This is the source the quality layer exists to watch.
 
-Deliberately unimplemented parts are marked TODO(you). Read the fixture HTML before writing
+Deliberately unimplemented parts are marked TODO(owner). Read the fixture HTML before writing
 any parsing code. Save two or three real reports to `tests/fixtures/` first (different
 months if you can), and write the parser against those. The pattern you *think* the page
 uses and the pattern it *actually* uses will differ, and finding out how is the lesson.
@@ -80,7 +80,7 @@ def fetch_listing(session: requests.Session | None = None) -> str:
 def parse_listing(html: str) -> list[str]:
     """Extract the URLs of individual sighting-report posts from the listing page.
 
-    TODO(you): implement against a saved fixture. Watch for: pagination, posts that are
+    TODO(owner): implement against a saved fixture. Watch for: pagination, posts that are
     not sighting reports mixed into the same feed, relative vs absolute URLs.
     """
     soup = BeautifulSoup(html, "html.parser")
@@ -90,7 +90,7 @@ def parse_listing(html: str) -> list[str]:
 def parse_report(html: str, post_url: str) -> SightingReport:
     """Extract date, count and temperatures from one report's HTML.
 
-    TODO(you): implement. Suggested order of attack:
+    TODO(owner): implement. Suggested order of attack:
       1. Date. Is it in the URL, the title, a <time> tag, or only in the prose?
       2. Counts. Find the sentence, then the numbers. Keep the sentence (`count_text`).
          Two counts per day are common ("186 by researchers, 191 by the park"). A count
@@ -117,7 +117,7 @@ def fetch_reports(
     HTML (or one raw row per post; your call, but decide it now). The listing page is
     not worth keeping.
 
-    TODO(you): wire together fetch_listing -> parse_listing -> fetch each post ->
+    TODO(owner): wire together fetch_listing -> parse_listing -> fetch each post ->
     parse_report. Be polite: one request at a time, a short sleep between posts. On a
     parse failure for a single post, decide whether the whole run fails or the post is
     skipped and counted. (Hint: the volume check wants to know about skipped posts.)

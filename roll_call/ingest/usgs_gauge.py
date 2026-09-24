@@ -44,7 +44,7 @@ def _headers() -> dict[str, str]:
 def fetch_daily(start: date, end: date, session: requests.Session | None = None) -> IngestResult:
     """Fetch daily-mean water temperature for the window. Records the run either way.
 
-    TODO(you): pagination. The API pages large results; a season-long window may not fit in
+    TODO(owner): pagination. The API pages large results; a season-long window may not fit in
     one response. Look for a `next` link in the response's `links` and follow it until there
     is none, keeping every page's raw text. Try a one-year window against the live API first
     and see what comes back.
@@ -67,7 +67,7 @@ def fetch_daily(start: date, end: date, session: requests.Session | None = None)
 def parse_daily(payload: dict[str, Any]) -> list[dict[str, Any]]:
     """One record per day: obs_date, water_temp_c, unit, approval_status.
 
-    TODO(you): implement against a saved fixture (smoke test 5 in docs/sources.md).
+    TODO(owner): implement against a saved fixture (smoke test 5 in docs/sources.md).
       - `value` may arrive as a string. Convert it, and decide what a non-numeric value means.
       - Check `unit_of_measure` rather than assuming °C. A unit change is exactly what the
         distribution checks should catch, so keep the unit on every row.

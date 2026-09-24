@@ -5,10 +5,8 @@ of these hosts, so every call below is documented from official docs, client sou
 search results, not executed. Items marked **verify** need one manual call before they are
 trusted. Run the smoke tests at the end first.
 
-Roles, per the spec: the reports give the counts and the report temperature; Open-Meteo's
-archive gives observed air weather for training and baselines, and its forecast feeds live
-predictions; the USGS gauge gives continuous river temperature. Florida's aerial surveys are
-out of the first version (§4).
+Which source feeds what is in the spec, §3. Florida's aerial surveys are out of the first
+version (§4 below).
 
 ## 1. Open-Meteo
 

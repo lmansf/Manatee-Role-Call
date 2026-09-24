@@ -13,6 +13,6 @@ def test_daily_params_target_water_temperature_daily_mean():
     assert p["time"] == "2024-11-01/2025-03-31"
 
 
-@pytest.mark.skip(reason="TODO(you): save a response (docs/sources.md smoke test 5), implement parse_daily, unskip")
+@pytest.mark.skip(reason="TODO(owner): save a response (docs/sources.md smoke test 5), implement parse_daily, unskip")
 def test_parse_daily_keeps_unit_and_approval_status():
     ...

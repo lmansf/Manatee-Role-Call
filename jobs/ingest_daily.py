@@ -8,7 +8,7 @@ Each source is wrapped separately so one failing doesn't stop the others, and ev
 still leaves an `ingest_runs` row (IngestRun.fail + db.record_run). The run exits non-zero if
 any source failed, so systemd marks it failed and retries (the service has Restart=on-failure).
 
-TODO(you): implement main(). The shape:
+TODO(owner): implement main(). The shape:
 
     con = db.connect()
     for each source:

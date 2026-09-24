@@ -25,7 +25,7 @@ from roll_call import config
 def assert_safe_target(db_path: Path | str) -> None:
     """Raise unless `db_path` is a different file from the live database (config.DB_PATH).
 
-    TODO(you): implement and test first, before any mutation function exists. Compare
+    TODO(owner): implement and test first, before any mutation function exists. Compare
     resolved paths, not strings: a relative path, a symlink or a `..` must not slip past.
     Consider also refusing anything inside the backup folder (BACKUP_DIR).
     """

@@ -8,7 +8,7 @@ year, so backfill from about 1988.
 Pull one calendar year per request to keep each raw payload small, and write through
 db.write_ingest_result like any other run. Run once; re-run only to rebuild.
 
-TODO(you): implement. The field set is fixed (open_meteo.DAILY_FIELDS, HOURLY_FIELDS).
+TODO(owner): implement. The field set is fixed (open_meteo.DAILY_FIELDS, HOURLY_FIELDS).
 Changing it later means re-backfilling, which is fine but should be a conscious act.
 """
 from __future__ import annotations

@@ -105,7 +105,7 @@ def fetch_archive(start: date, end: date, session: requests.Session | None = Non
 def fetch_forecast(session: requests.Session | None = None) -> IngestResult:
     """Fetch today's 7-day daily forecast. Records are keyed by (issue_date, target_date).
 
-    TODO(you): mirror fetch_archive. `issue_date` is today's date in config.TIMEZONE, not
+    TODO(owner): mirror fetch_archive. `issue_date` is today's date in config.TIMEZONE, not
     UTC; a run just after midnight UTC is still "yesterday" in Florida. parse_daily can be
     reused if you let it take the issue date as an extra key, or write a sibling.
     """
@@ -115,7 +115,7 @@ def fetch_forecast(session: requests.Session | None = None) -> IngestResult:
 def parse_hourly(payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Row-orient the `hourly` block: one record per hour with obs_ts and temperature_2m.
 
-    TODO(you): same shape as parse_daily. Timestamps arrive as local ISO strings without
+    TODO(owner): same shape as parse_daily. Timestamps arrive as local ISO strings without
     an offset because of the `timezone` param; decide whether to store them naive-local
     or convert to UTC. Whatever you pick, the daily-mean cross-check against the API's
     temperature_2m_mean has to group by local day, or it will be off at the edges.
@@ -129,7 +129,7 @@ def parse_daily(payload: dict[str, Any]) -> list[dict[str, Any]]:
     Each record should carry: obs_date (date), one key per field in DAILY_FIELDS, and the
     unit for each field from `daily_units` (or a single `units` dict, your call).
 
-    TODO(you): implement. Things to decide as you go:
+    TODO(owner): implement. Things to decide as you go:
       - Open-Meteo returns null for days it has no data (the archive lags ~5 days).
         Do you keep those rows with nulls, or drop them? The null-rate check in stage 2
         behaves very differently depending on this answer.

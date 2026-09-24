@@ -71,7 +71,7 @@ def write_ingest_result(con: duckdb.DuckDBPyConnection, result: IngestResult,
                         raw_table: str, parsed_table: str) -> None:
     """Persist one IngestResult: one raw row, N parsed rows, then the run row.
 
-    TODO(you): implement. The interesting decision is idempotency. Runs catch up from the last
+    TODO(owner): implement. The interesting decision is idempotency. Runs catch up from the last
     success, so windows overlap by design, and a retry after a failure repeats work.
       - A plain INSERT duplicates rows, and the duplicate check in stage 2 fires on your own
         pipeline. Instructive once, not what you want to keep.

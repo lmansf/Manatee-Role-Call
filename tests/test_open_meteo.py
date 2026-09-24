@@ -21,11 +21,11 @@ def test_forecast_params_never_request_past_days():
     assert p["forecast_days"] == 7
 
 
-@pytest.mark.skip(reason="TODO(you): implement parse_daily, then save a fixture and unskip")
+@pytest.mark.skip(reason="TODO(owner): implement parse_daily, then save a fixture and unskip")
 def test_parse_daily_one_row_per_day():
     ...
 
 
-@pytest.mark.skip(reason="TODO(you): misaligned arrays must raise, not silently truncate")
+@pytest.mark.skip(reason="TODO(owner): misaligned arrays must raise, not silently truncate")
 def test_parse_daily_rejects_misaligned_arrays():
     ...

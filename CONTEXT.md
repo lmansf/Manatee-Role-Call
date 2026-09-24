@@ -18,7 +18,7 @@ _Avoid_: source, observer
 
 **Count**:
 The number of manatees one counter reports at one roll call. The researchers' count is the
-modelling target; the park count is a separate series, never a substitute for it.
+modelling target; the park count is a separate series.
 _Avoid_: total, sighting, "the number"
 
 **Estimate**:
@@ -28,11 +28,11 @@ _Avoid_: guess, rough count
 
 **Counter disagreement**:
 The gap between the researchers' count and the park count at the same roll call. Watched over
-time; never a reason to doubt either count on its own.
+time as a measure of its own; a large gap says the counters differ, not which one is wrong.
 _Avoid_: discrepancy, error
 
 **Late arrivals**:
-Manatees reported arriving after the roll call ended. Never part of a count.
+Manatees reported arriving after the roll call ended. Recorded apart from the count.
 _Avoid_: additional count, new count
 
 **River temperature**:
