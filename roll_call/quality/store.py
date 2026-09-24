@@ -1,9 +1,14 @@
-"""Incidents and quarantined observations: the tables and the writes that keep them honest.
+"""Incidents, quarantined observations and measures: the tables and the writes that keep them
+honest.
 
-Both writes are idempotent. The checks run every day over overlapping windows, so the same
+The incident and quarantine writes are idempotent. The checks run every day over overlapping windows, so the same
 failure or the same doubtful value is seen many times. It must open once and alert once.
 Detail and value columns hold names and numbers only: the repo and the site are public, and
 report text stays on the owner's machine.
+
+A measure is a number watched over time that never judges anything, such as counter
+disagreement. One row per measure and key; a re-run overwrites its own rows, and rows for other
+keys accumulate into a history.
 """
 from __future__ import annotations
 
@@ -15,6 +20,7 @@ import duckdb
 
 INCIDENTS = "incidents"
 QUARANTINE = "quarantine"
+MEASURES = "measures"
 
 INCIDENTS_DDL = f"""
 CREATE TABLE IF NOT EXISTS {INCIDENTS} (
@@ -42,6 +48,17 @@ CREATE TABLE IF NOT EXISTS {QUARANTINE} (
 )
 """
 
+MEASURES_DDL = f"""
+CREATE TABLE IF NOT EXISTS {MEASURES} (
+    measure          VARCHAR NOT NULL,
+    obs_key          VARCHAR NOT NULL,  -- such as the report date, or the run date
+    observation_date DATE,
+    value            DOUBLE,
+    computed_at      TIMESTAMP NOT NULL,  -- UTC
+    PRIMARY KEY (measure, obs_key)
+)
+"""
+
 _INCIDENT_COLUMNS = ("incident_id", "source", "check_name", "opened_at", "closed_at",
                      "detail", "alerted_at")
 _QUARANTINE_COLUMNS = ("obs_id", "source", "table_name", "obs_key", "observation_date",
@@ -62,9 +79,10 @@ def table_exists(con: duckdb.DuckDBPyConnection, name: str) -> bool:
 
 
 def ensure_tables(con: duckdb.DuckDBPyConnection) -> None:
-    """Create the incidents and quarantine tables if they do not exist."""
+    """Create the incidents, quarantine and measures tables if they do not exist."""
     con.execute(INCIDENTS_DDL)
     con.execute(QUARANTINE_DDL)
+    con.execute(MEASURES_DDL)
 
 
 def obs_id(table_name: str, obs_key: str) -> str:
@@ -157,6 +175,19 @@ def quarantine_observation(con: duckdb.DuckDBPyConnection, source: str, table_na
     con.execute(f"INSERT INTO {QUARANTINE} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [row[c] for c in _QUARANTINE_COLUMNS])
     return row, True
+
+
+def record_measure(con: duckdb.DuckDBPyConnection, measure: str, obs_key: str,
+                   observation_date: date | None, value: float | None,
+                   now: datetime | None = None) -> None:
+    """Store one value of a measure. A value already stored for the same measure and key is
+    replaced, so a re-run overwrites and never duplicates."""
+    con.execute(
+        f"INSERT OR REPLACE INTO {MEASURES} (measure, obs_key, observation_date, value, computed_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [measure, obs_key, observation_date, None if value is None else float(value),
+         now or utc_now()],
+    )
 
 
 def mark_alerted(con: duckdb.DuckDBPyConnection, incident_ids: list[str], obs_ids: list[str],

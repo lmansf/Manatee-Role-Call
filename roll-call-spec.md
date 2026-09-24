@@ -177,10 +177,15 @@ See [ADR 0002](docs/adr/0002-local-scheduled-script-with-duckdb.md).
 | Volume | Rows from each source's latest run against an expected range. Counts have no expected range, because most runs find zero or one new report. Duplicate keys in each parsed table. |
 | Schema | A check whose query fails on a missing or renamed column opens a schema incident for that source. The other checks still run. |
 | Distribution | Null rate per column. Units against the pinned units, for weather and the gauge. An archive weather value beyond three standard deviations of the normal for that day of the year is quarantined. |
-| Counts | Not judged by standard deviations ([ADR 0001](docs/adr/0001-counts-not-judged-by-standard-deviations.md)). A count outside the plausible range, or a jump that contradicts the river temperature, is quarantined. Counter disagreement is computed on each run as its own measure. It never quarantines and is not stored yet. |
+| Counts | Not judged by standard deviations ([ADR 0001](docs/adr/0001-counts-not-judged-by-standard-deviations.md)). A count outside the plausible range, or a jump that contradicts the river temperature, is quarantined. Counter disagreement is computed on each run as its own measure and stored in the `measures` table, one row per report date, which a re-run overwrites. It never quarantines and never opens an incident. |
 | Cross-source | Report temperature against gauge temperature. When their difference moves too far from its trailing median, the check opens an incident on the gauge source. It quarantines nothing. |
 
-Join retention between counts, weather and gauge by date is not checked yet.
+Join retention is checked on each run. Over the lookback window, it takes the counted report
+dates and measures the share that have a gauge value for the same date and the share that have
+archive weather for it. Dates still inside the archive's lag are left out of the weather share,
+and today is left out of the gauge share. Both shares are stored in the `measures` table. A
+share below its threshold opens an incident on the counts source, which closes when the share
+recovers.
 
 A missing or renamed column opens a schema incident. The null-rate checks catch a column that
 was always populated arriving null, which no query error would show.
