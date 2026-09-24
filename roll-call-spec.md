@@ -1,4 +1,4 @@
-# Roll Call — project spec
+# Roll Call: project spec
 
 A data pipeline whose real subject is the **data-quality layer**. The manatee prediction is the
 excuse; the point of the project is catching a source that changes underneath you.
@@ -17,8 +17,8 @@ the glossary says. Decisions that were hard to reverse or surprising are recorde
 > systemd timer on my Ubuntu machine and storing everything in one DuckDB file, that predicts
 > tomorrow's manatee count at Blue Spring State Park from weather and river temperature. The
 > real focus is the data-quality layer around it: freshness, volume and consistency checks,
-> quarantine for doubtful observations, incidents for failing sources, and a Tableau Public
-> dashboard fed through Google Sheets.
+> quarantine for doubtful observations, incidents for failing sources, and a public Evidence
+> dashboard on Vercel, rebuilt from summary CSVs that each run pushes to the repo.
 >
 > Read `roll-call-spec.md`, `CONTEXT.md` and `docs/adr/` first. I write the code myself where
 > it's instructive: give me structure, let me fill in the logic, and flag where I'd learn more
@@ -31,24 +31,32 @@ the glossary says. Decisions that were hard to reverse or surprising are recorde
 Most portfolio pipelines show that data *moved*. This one shows that the data was *watched*:
 what the pipeline did when a source drifted, went stale, or started lying.
 
-Deliverables: a GitHub repo, a Tableau Public dashboard, and a short written walkthrough.
+Deliverables: a GitHub repo, an Evidence dashboard site on Vercel, and a short written walkthrough.
 
 ## 2. Platform
 
 See [ADR 0002](docs/adr/0002-local-scheduled-script-with-duckdb.md).
 
-- **Runs on:** the owner's Ubuntu machine, as a plain Python script.
+- **Runs on:** the owner's Ubuntu machine, as a plain Python script, from a runner clone of the
+  repo at `~/roll-call-runner`. The runner clone stays on `main` and is never used for editing.
 - **Schedule:** a systemd user timer at 19:00 local, `Persistent=true` so a run missed while the
   machine was off or asleep fires when it's back. Setup: [`docs/scheduling.md`](docs/scheduling.md).
 - **Catch-up:** every run fetches everything since the last successful run for each source, not
   just yesterday. A missed run therefore costs at most that day's weather forecast.
 - **Storage:** one DuckDB file. Every table a run touches is keyed so re-running is safe.
+- **Publish:** the run's last step, `jobs/publish_dashboard.py`, exports the dashboard CSVs,
+  commits them and pushes to `main` (§6).
+- **Push access:** an SSH deploy key with write access to this one repo, not a personal token.
+  Setup: [`docs/scheduling.md`](docs/scheduling.md).
+- **Dashboard hosting:** Vercel rebuilds the Evidence site on every push to `main`
+  ([ADR 0003](docs/adr/0003-evidence-on-vercel-instead-of-tableau.md)).
 - **Secrets:** a `.env` file in the repo folder, ignored by git. `.env.example` lists the keys.
+  The deploy key lives in `~/.ssh`, outside the repo.
 - **Backup:** clearing decisions and the baseline refresh log are exported as CSV and committed
   (they are the records only a person could make). The whole database file is copied weekly to
   a second disk by a second timer.
 - **Not used:** Databricks (outbound allowlist, quota shutdowns), GitHub Actions (owner's call),
-  Dagster (a separate learning series).
+  Dagster (a separate learning series), Tableau Public with Google Sheets (ADR 0003).
 
 ## 3. Data sources
 
@@ -161,17 +169,36 @@ counts 0–1,500) and are calibrated from the historical seasons once extracted.
 
 ## 6. Dashboard
 
-**Tableau Public cannot connect to databases**, only flat files, Google Sheets and a few others,
-because everything saved to it is public.
+An [Evidence](https://evidence.dev) site deployed on Vercel. Evidence builds a static site from
+SQL and Markdown and runs its queries at build time. Why not Tableau Public:
+[ADR 0003](docs/adr/0003-evidence-on-vercel-instead-of-tableau.md).
 
-**The path:** each run computes check summaries in Python and writes them to a Google Sheet via
-`gspread` with a service account (share the sheet with its email). Tableau Public reads the sheet
-and refreshes on its own schedule.
+**The path:**
 
-**Write summaries, not raw logs:** one row per source per run, metrics precomputed.
+1. The daily run ends with `jobs/publish_dashboard.py`. It computes the summaries in Python and
+   writes them as CSV into `dashboard/sources/roll_call/`.
+2. If any file changed, it commits only that folder and pushes to `main` with the deploy key.
+   It refuses to run on another branch or with other uncommitted changes.
+3. Vercel sees the push and rebuilds the site from `dashboard/`.
 
-**Public by design:** the sheet carries dates, check names, values, statuses and ages only.
-Report text names people and never goes there.
+**The files:**
+
+| File | Contents |
+|---|---|
+| `meta.csv` | When the data was generated. |
+| `source_status.csv` | Per source: last successful run, rows against expectation, null rate against normal. |
+| `baseline_drift.csv` | Per baseline refresh: old and new values, and whether the refresh was replayed. |
+| `quarantine_queue.csv` | Per quarantined observation: source, check, dates quarantined and cleared, outcome. |
+
+**Write summaries, not raw logs:** metrics are precomputed in Python, and the site only charts
+them.
+
+**Public by design:** the repo and the site are public. The CSVs carry dates, source and check
+names, numbers and statuses only. Report text names people and never goes there, and neither do
+clearing reasons. The DuckDB file is never committed.
+
+**Staleness:** the site shows when its data was generated and warns when that is more than two
+days old. The owner's machine may be off, and the dashboard has to say so.
 
 ### Views
 

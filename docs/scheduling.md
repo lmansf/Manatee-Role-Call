@@ -4,32 +4,82 @@ Two systemd **user** timers: the daily run at 19:00, and a weekly backup. Both a
 `Persistent=true`, so a run missed while the machine was off or asleep fires as soon as it's
 back. Both jobs take the same lock file, so they can't open the database at the same time.
 
-These steps assume the repo is at `~/Manatee-Role-Call`. If it isn't, change the paths in the
-two `.service` files.
+The timers run from a runner clone of the repo at `~/roll-call-runner`. It stays on `main` and
+is never used for editing. The daily run ends by committing the dashboard CSVs and pushing them
+to `main`, and it refuses to do that on another branch or with other uncommitted changes. Keep
+the clone you edit in somewhere else. If the runner clone isn't at `~/roll-call-runner`, change
+the paths in the two `.service` files.
 
-## 1. Prepare the project
+## 1. Create the runner clone
 
 ```sh
-cd ~/Manatee-Role-Call
+git clone https://github.com/lmansf/Manatee-Role-Call.git ~/roll-call-runner
+cd ~/roll-call-runner
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 cp .env.example .env        # then fill it in
 .venv/bin/python -m pytest  # should pass
 ```
 
-Run each job once by hand and confirm it succeeds before scheduling it. A job that fails by
-hand will also fail on the timer, just more quietly.
-
-```sh
-.venv/bin/python jobs/ingest_daily.py
-.venv/bin/python jobs/backup_db.py
-```
+The database file lives in the runner clone's `data/` folder. If you already have one in another
+clone, move it here before the first run.
 
 The backup needs `BACKUP_DIR` in `.env` pointing at a folder on the second disk. That disk must
 be mounted at boot, through `/etc/fstab` or the Disks app's "Mount at system startup" option.
 If it isn't mounted, the backup fails on purpose.
 
-## 2. Create the unit files
+## 2. Give the runner clone push access
+
+The push uses a deploy key: an SSH key that GitHub attaches to one repo, not to your account.
+If it leaks, it reaches this repo and nothing else.
+
+Create the key. `-N ""` leaves it without a passphrase, because the timer can't type one.
+
+```sh
+ssh-keygen -t ed25519 -C "roll-call-runner" -f ~/.ssh/roll_call_deploy -N ""
+cat ~/.ssh/roll_call_deploy.pub
+```
+
+On GitHub, open the repo's Settings, then Deploy keys, then Add deploy key. Paste the public key,
+name it `roll-call-runner`, and tick "Allow write access".
+
+Add a host alias to `~/.ssh/config`, so git uses this key for this repo only:
+
+```
+Host github-roll-call
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/roll_call_deploy
+    IdentitiesOnly yes
+```
+
+Point the runner clone's remote at the alias, then test a push without sending anything:
+
+```sh
+cd ~/roll-call-runner
+git remote set-url origin git@github-roll-call:lmansf/Manatee-Role-Call.git
+git push --dry-run origin main
+```
+
+The first connection asks you to confirm GitHub's host key. Answer it now, because the timer
+can't. The dry run should end with "Everything up-to-date". A "read only" error means the key
+was added without write access.
+
+## 3. Run each job by hand
+
+Run each job once and confirm it succeeds before scheduling it. A job that fails by hand will
+also fail on the timer, just more quietly.
+
+```sh
+cd ~/roll-call-runner
+.venv/bin/python jobs/ingest_daily.py
+.venv/bin/python jobs/backup_db.py
+```
+
+After the daily run, `git log -1` shows the data commit if the dashboard CSVs changed. Vercel
+then starts a new build of the site.
+
+## 4. Create the unit files
 
 ```sh
 mkdir -p ~/.config/systemd/user
@@ -46,8 +96,8 @@ StartLimitBurst=4
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/Manatee-Role-Call
-ExecStart=/usr/bin/flock %h/Manatee-Role-Call/data/.run.lock %h/Manatee-Role-Call/.venv/bin/python jobs/ingest_daily.py
+WorkingDirectory=%h/roll-call-runner
+ExecStart=/usr/bin/flock %h/roll-call-runner/data/.run.lock %h/roll-call-runner/.venv/bin/python jobs/ingest_daily.py
 # Right after waking, the network is often not up yet. Retry instead of losing the day.
 Restart=on-failure
 RestartSec=5min
@@ -75,8 +125,8 @@ Description=Roll Call weekly backup
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/Manatee-Role-Call
-ExecStart=/usr/bin/flock %h/Manatee-Role-Call/data/.run.lock %h/Manatee-Role-Call/.venv/bin/python jobs/backup_db.py
+WorkingDirectory=%h/roll-call-runner
+ExecStart=/usr/bin/flock %h/roll-call-runner/data/.run.lock %h/roll-call-runner/.venv/bin/python jobs/backup_db.py
 ```
 
 `~/.config/systemd/user/roll-call-backup.timer`:
@@ -97,7 +147,7 @@ WantedBy=timers.target
 needs systemd 244 or later. Every supported Ubuntu release has that. Check yours with
 `systemctl --version`.
 
-## 3. Turn it on
+## 5. Turn it on
 
 ```sh
 systemctl --user daemon-reload
@@ -108,7 +158,7 @@ sudo loginctl enable-linger "$USER"   # run the timers even when you're not logg
 `OnCalendar` uses the machine's local time zone. Check it's `America/New_York`, or whatever you
 intend, with `timedatectl`.
 
-## 4. Check it
+## 6. Check it
 
 ```sh
 systemctl --user list-timers roll-call*          # next and last run times
