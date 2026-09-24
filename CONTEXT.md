@@ -87,6 +87,11 @@ the old and new versions kept side by side. For weather, it is the normal for ea
 year over the trailing 30 years.
 _Avoid_: norm, rolling average
 
+**Replayed refresh**:
+A baseline refresh computed after the fact for a past year, using exactly the live rule, and
+labelled as replayed. Gives the drift history its years before the pipeline existed.
+_Avoid_: backfilled baseline, simulated refresh
+
 **Quarantined observation**:
 A single observation held out of training because a check doubted it, until a person clears it.
 _Avoid_: bad row, dropped row
